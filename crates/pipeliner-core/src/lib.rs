@@ -76,6 +76,7 @@ pub mod matrix;
 pub mod options;
 pub mod parameters;
 pub mod pipeline;
+pub mod prelude;
 pub mod validation;
 
 // Re-exports for common use

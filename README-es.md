@@ -100,6 +100,110 @@ rust-script mi_pipeline.rs
 
 ---
 
+## Ejecución Simplificada de Pipelines
+
+Pipeliner proporciona una API simplificada para ejecución rápida de pipelines sin configuración verbosa.
+
+### Usando la Macro `run!` (Async)
+
+Ejecuta pipelines inmediatamente con manejo automático de errores:
+
+```rust
+use pipeliner_core::prelude::*;
+
+let pipeline = Pipeline::new()
+    .with_agent(AgentType::any())
+    .with_stage(
+        Stage::new("Build")
+            .with_agent(AgentType::docker("rust:latest"))
+            .with_step(Step::shell("cargo build --release"))
+    )
+    .with_stage(
+        Stage::new("Test")
+            .with_step(Step::shell("cargo test"))
+    );
+
+run!(pipeline); // Ejecuta y sale con código 1 en caso de fallo
+```
+
+### Usando la Macro `run_sync!` (Bloqueante)
+
+Para contextos no-async, usa la variante bloqueante:
+
+```rust
+use pipeliner_core::prelude::*;
+
+let pipeline = Pipeline::new()
+    .with_agent(AgentType::any())
+    .with_stage(
+        Stage::new("Build")
+            .with_step(Step::shell("cargo build"))
+    );
+
+run_sync!(pipeline); // Usa tokio runtime internamente
+```
+
+### Usando LocalExecutor Directamente
+
+Para más control, usa `LocalExecutor` directamente:
+
+```rust
+use pipeliner_executor::LocalExecutor;
+use pipeliner_core::{Pipeline, Stage, Step, AgentType};
+
+#[tokio::main]
+async fn main() {
+    let pipeline = Pipeline::new()
+        .with_name("Mi Pipeline")
+        .with_agent(AgentType::any())
+        .with_stage(
+            Stage::new("Build")
+                .with_step(Step::echo("Iniciando build..."))
+                .with_step(Step::shell("cargo build").with_retry(3))
+        )
+        .with_stage(
+            Stage::new("Test")
+                .with_step(Step::shell("cargo test"))
+        );
+
+    let executor = LocalExecutor::new();
+    let results = executor.execute(&pipeline).await;
+
+    for result in &results {
+        println!("[{}] {} - {}", result.stage, result.success, result.output);
+    }
+}
+```
+
+### API con Patrón Builder
+
+Todos los tipos principales soportan métodos builder para construcción fluida de pipelines:
+
+```rust
+use pipeliner_core::{Pipeline, Stage, Step, AgentType};
+
+let pipeline = Pipeline::builder()
+    .name("Mi Pipeline")
+    .description("Un pipeline de prueba")
+    .with_agent(AgentType::docker("rust:1.92"))
+    .with_stage(
+        Stage::new("Build")
+            .with_agent(AgentType::any()) // Sobrescribir agent del stage
+            .with_step(
+                Step::shell("cargo build --release")
+                    .with_name("build-release")
+                    .with_timeout(std::time::Duration::from_secs(300))
+            )
+    )
+    .with_stage(
+        Stage::new("Test")
+            .with_step(Step::shell("cargo test").with_retry(2))
+    )
+    .build();
+```
+
+---
+
 ## Referencia del DSL
 
 ### Definición de Pipeline

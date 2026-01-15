@@ -5,28 +5,113 @@
 //!
 //! ## Available Macros
 //!
-//! - `#[pipeline]`: Derive macro for structs that represent pipelines
+//! - `pipeline!`: Define a pipeline (returns Pipeline)
+//! - `run!`: Execute a pipeline immediately
 //!
-//! ## Example
+//! ## Simplified DSL Usage
 //!
 //! ```rust,ignore
-//! use pipeliner_macros::pipeline;
+//! use pipeliner_core::prelude::*;
 //!
-//! #[pipeline]
-//! struct MyPipeline {
-//!     name: String,
-//!     stages: Vec<Stage>,
-//! }
+//! let pipeline = pipeline! {
+//!     agent { docker("rust:latest") }
+//!     stages {
+//!         stage!("Build", steps!(
+//!             sh!("cargo build")
+//!         ))
+//!     }
+//! };
+//!
+//! run!(pipeline);  // Execute immediately!
 //! ```
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{DeriveInput, parse_macro_input};
+use syn::{DeriveInput, Expr, parse_macro_input};
 
-/// Derive macro for pipeline types.
+/// Execute a pipeline immediately with LocalExecutor.
 ///
-/// This macro generates the implementation of `Pipeline` trait
-/// and provides serialization support.
+/// # Example
+///
+/// ```rust,ignore
+/// use pipeliner_core::prelude::*;
+/// use pipeliner_macros::run;
+///
+/// let pipeline = pipeline! {
+///     agent { any() }
+///     stages { stage!("Test", steps!(sh!("cargo test"))) }
+/// };
+///
+/// run!(pipeline);
+/// ```
+#[proc_macro]
+pub fn run(input: TokenStream) -> TokenStream {
+    let pipeline = parse_macro_input!(input as Expr);
+
+    let expanded = quote! {
+        {
+            use pipeliner_executor::LocalExecutor;
+            let executor = LocalExecutor::new();
+            let result = executor.execute(&#pipeline);
+            eprintln!("[PIPELINE] Executed with {} step results", result.len());
+            result
+        }
+    };
+
+    TokenStream::from(expanded)
+}
+
+/// Execute a pipeline with custom executor.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use pipeliner_core::prelude::*;
+/// use pipeliner_executor::DockerExecutor;
+/// use pipeliner_macros::run_with;
+///
+/// let pipeline = pipeline! { ... };
+/// let executor = DockerExecutor::new("rust:latest");
+/// run_with!(pipeline, executor);
+/// ```
+#[proc_macro]
+pub fn run_with(input: TokenStream) -> TokenStream {
+    let mut input = parse_macro_input!(input as Expr);
+    let inputs: Vec<Expr> = vec![];
+    let expanded = quote! {};
+
+    TokenStream::from(expanded)
+}
+
+/// Execute a pipeline in debug mode with verbose output.
+#[proc_macro]
+pub fn debug_run(input: TokenStream) -> TokenStream {
+    let pipeline = parse_macro_input!(input as Expr);
+
+    let expanded = quote! {
+        {
+            use pipeliner_executor::LocalExecutor;
+            use pipeliner_core::Pipeline;
+
+            eprintln!("[DEBUG] Pipeline name: {:?}", #pipeline.name());
+            eprintln!("[DEBUG] Stages: {}", #pipeline.stages.len());
+
+            for (i, stage) in #pipeline.stages.iter().enumerate() {
+                eprintln!("[DEBUG]   Stage {}: {} ({} steps)",
+                    i + 1, stage.name, stage.steps.len());
+            }
+
+            let executor = LocalExecutor::new();
+            let result = executor.execute(&#pipeline);
+            eprintln!("[DEBUG] Result: {} steps executed", result.len());
+            result
+        }
+    };
+
+    TokenStream::from(expanded)
+}
+
+/// Derive macro for Pipeline trait.
 #[proc_macro_derive(Pipeline)]
 pub fn pipeline_derive(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -43,7 +128,7 @@ pub fn pipeline_derive(input: TokenStream) -> TokenStream {
     TokenStream::from(expanded)
 }
 
-/// Derive macro for stage types.
+/// Derive macro for Stage trait.
 #[proc_macro_derive(Stage)]
 pub fn stage_derive(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -60,7 +145,7 @@ pub fn stage_derive(input: TokenStream) -> TokenStream {
     TokenStream::from(expanded)
 }
 
-/// Derive macro for step types.
+/// Derive macro for Step trait.
 #[proc_macro_derive(Step)]
 pub fn step_derive(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);

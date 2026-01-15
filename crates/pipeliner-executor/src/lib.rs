@@ -30,11 +30,13 @@
 
 pub mod context;
 pub mod listener;
+pub mod local;
 pub mod runtime;
 pub mod strategy;
 
 pub use context::{ExecutionConfig, ExecutionContext};
 pub use listener::ExecutionListener;
+pub use local::{LocalExecutor, LocalResult};
 pub use runtime::StepExecutor;
 pub use strategy::{ExecutionStrategy, ParallelStrategy, SequentialStrategy};
 

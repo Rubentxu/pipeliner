@@ -85,7 +85,7 @@ fn default_threshold() -> String {
 }
 
 /// A single stage in a pipeline
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Stage {
     /// Stage name
@@ -409,6 +409,11 @@ impl Pipeline {
         Self::default()
     }
 
+    /// Gets the pipeline name
+    pub fn name(&self) -> Option<&str> {
+        self.name.as_deref()
+    }
+
     /// Sets the pipeline name
     #[must_use]
     pub fn with_name(mut self, name: impl Into<String>) -> Self {
@@ -521,6 +526,113 @@ impl Validate for Stage {
         }
 
         Ok(())
+    }
+}
+
+impl Stage {
+    /// Creates a new stage with the given name
+    #[must_use]
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            agent: None,
+            environment: Environment::new(),
+            options: None,
+            when: None,
+            post: None,
+            steps: Vec::new(),
+        }
+    }
+
+    /// Sets the stage name
+    #[must_use]
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.name = name.into();
+        self
+    }
+
+    /// Sets the agent for this stage
+    #[must_use]
+    pub fn with_agent(mut self, agent: AgentType) -> Self {
+        self.agent = Some(agent);
+        self
+    }
+
+    /// Adds a step to this stage
+    #[must_use]
+    pub fn with_step(mut self, step: Step) -> Self {
+        self.steps.push(step);
+        self
+    }
+
+    /// Sets the environment for this stage
+    #[must_use]
+    pub fn with_environment(mut self, environment: Environment) -> Self {
+        self.environment = environment;
+        self
+    }
+}
+
+impl Default for Stage {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            agent: None,
+            environment: Environment::new(),
+            options: None,
+            when: None,
+            post: None,
+            steps: Vec::new(),
+        }
+    }
+}
+
+impl Step {
+    /// Creates a new shell step
+    #[must_use]
+    pub fn shell(command: impl Into<String>) -> Self {
+        Self {
+            step_type: StepType::Shell {
+                command: command.into(),
+            },
+            name: None,
+            timeout: None,
+            retry: None,
+        }
+    }
+
+    /// Creates a new echo step
+    #[must_use]
+    pub fn echo(message: impl Into<String>) -> Self {
+        Self {
+            step_type: StepType::Echo {
+                message: message.into(),
+            },
+            name: None,
+            timeout: None,
+            retry: None,
+        }
+    }
+
+    /// Sets the step name
+    #[must_use]
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into());
+        self
+    }
+
+    /// Sets the retry count
+    #[must_use]
+    pub fn with_retry(mut self, count: usize) -> Self {
+        self.retry = Some(count);
+        self
+    }
+
+    /// Sets the timeout
+    #[must_use]
+    pub fn with_timeout(mut self, duration: Duration) -> Self {
+        self.timeout = Some(duration);
+        self
     }
 }
 
