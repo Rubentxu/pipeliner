@@ -1,194 +1,326 @@
 # Pipeliner
 
-Una biblioteca de orquestación de pipelines basada en Rust, construida con Arquitectura Hexagonal, diseñada para crear sistemas de pipelines robustos, mantenibles y probables.
+<div align="center">
+
+**Una biblioteca de orquestación de pipelines basada en Rust con DSL compatible con Jenkins**
+
+[![Licencia: MIT OR Apache-2.0](https://img.shields.io/badge/Licencia-MIT%20OR%20Apache--2.0-blue.svg)](https://github.com/Rubentxu/pipeliner/blob/main/LICENSE)
+[![Rust](https://img.shields.io/badge/rust-1.92%2B-orange.svg)](https://www.rust-lang.org/)
+[![Tests](https://img.shields.io/badge/tests-121%20pasando-green.svg)](#suite-de-tests)
+[![Crates](https://img.shields.io/badge/crates-8-blue.svg)](#estructura-de-crates)
+
+</div>
+
+---
 
 ## Descripción General
 
-Pipeliner proporciona un marco flexible y extensible para definir y ejecutar pipelines con etapas, pasos y plugins. Sigue principios de arquitectura limpia para garantizar la separación de responsabilidades y la máxima flexibilidad.
+Pipeliner es una **biblioteca de orquestación de pipelines type-safe** escrita en Rust que proporciona un DSL (Domain Specific Language) compatible con Jenkins para definir pipelines CI/CD. Combina la expresividad del DSL de Jenkins con las garantías de seguridad y rendimiento de Rust.
 
-## Características
+### Características Principales
 
-- **Definición de Pipelines**: Crea pipelines complejos con etapas y pasos
-- **Sistema de Plugins**: Arquitectura de plugins extensible para añadir funcionalidad personalizada
-- **Gestión de Artefactos**: Maneja artefactos y salidas intermedias entre etapas
-- **Soporte de Concurrencia**: Ejecución eficiente con control de concurrencia adecuado
-- **Gestión de Errores**: Manejo robusto de errores y mecanismos de recuperación
-- **Configuración**: Sistema de configuración flexible para personalizar el comportamiento del pipeline
-- **Interfaz CLI**: Interfaz de línea de comandos integrada para gestionar pipelines
+- **DSL Compatible con Jenkins**: Define pipelines usando las macros familiares `pipeline!`, `stage!`, y `steps!`
+- **Type Safety**: Todas las definiciones de pipelines se validan en tiempo de compilación
+- **Ejecución Multi-Backend**: Ejecuta pipelines localmente, en Docker, Kubernetes o Podman
+- **Arquitectura Hexagonal**: Separación clara entre dominio, aplicación e infraestructura
+- **Integración con Rust-Script**: Ejecuta pipelines directamente con `rust-script` para máxima portabilidad
+- **Event Sourcing**: Almacén de eventos y bus de eventos integrado para observabilidad
+- **Sistema de Plugins Extensible**: Añade steps personalizados, agentes y ejecutores
+
+---
+
+## Inicio Rápido
+
+### Instalación
+
+```bash
+# Clonar el repositorio
+git clone https://github.com/Rubentxu/pipeliner.git
+cd pipeliner
+
+# Ejecutar tests para verificar
+cd crates && cargo test --workspace
+```
+
+### Tu Primer Pipeline
+
+Crea un archivo llamado `mi_pipeline.rs`:
+
+```rust
+#!/usr/bin/env rust-script
+//!
+//! # Mi Primer Pipeline con Pipeliner
+//!
+//! Ejecutar con: rust-script mi_pipeline.rs
+//!
+
+use rustline::LocalExecutor;
+use rustline::prelude::*;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let pipeline = pipeline! {
+        agent {
+            docker("rust:latest")
+        }
+        stages {
+            stage!("Checkout", steps!(
+                echo!("📦 Clonando repositorio..."),
+                sh!("git clone https://github.com/miorg/miproyecto.git")
+            ))
+            stage!("Build", steps!(
+                echo!("🔨 Compilando proyecto..."),
+                sh!("cargo build --release")
+            ))
+            stage!("Test", steps!(
+                echo!("🧪 Ejecutando tests..."),
+                sh!("cargo test")
+            ))
+            stage!("Deploy", steps!(
+                echo!("🚀 Desplegando a producción..."),
+                sh!("kubectl apply -f k8s/")
+            ))
+        }
+        post {
+            success(echo!("✅ Pipeline exitoso!")),
+            failure(echo!("❌ Pipeline fallido!"))
+        }
+    };
+
+    let executor = LocalExecutor::new();
+    executor.execute(&pipeline)?;
+    Ok(())
+}
+```
+
+Ejecútalo:
+
+```bash
+rust-script mi_pipeline.rs
+```
+
+---
+
+## Referencia del DSL
+
+### Definición de Pipeline
+
+```rust
+use rustline::prelude::*;
+
+let pipeline = pipeline! {
+    agent { any() },  // o docker("rust:latest"), kubernetes("default"), etc.
+    environment {
+        ("DEBUG", "1"),
+        ("ENTORNO", "produccion")
+    }
+    parameters {
+        string("VERSION", "1.0.0"),
+        boolean("DEPLOY_HABILITADO", true)
+    }
+    stages {
+        stage!("Build", steps!(
+            sh!("cargo build --release"),
+            sh!("cargo test --lib")
+        ))
+        stage!("Deploy", steps!(
+            echo!("Desplegando versión ${VERSION}"),
+            sh!("./deployar.sh ${VERSION}")
+        ))
+    }
+};
+```
+
+### Stages y Steps
+
+```rust
+stage!("NombreStage", steps!(
+    echo!("Un mensaje"),
+    sh!("comando shell a ejecutar"),
+    dir!("./ruta", steps!(
+        sh!("comando en directorio")
+    )),
+    retry!(3, sh!("comando que puede fallar")),
+    timeout!(30, sh!("comando largo"))
+))
+```
+
+### Post-Condiciones
+
+```rust
+post {
+    always(echo!("Siempre se ejecuta")),
+    success(echo!("Se ejecuta en éxito")),
+    failure(echo!("Se ejecuta en fallo")),
+    unstable(echo!("Se ejecuta cuando es inestable"))
+}
+```
+
+---
 
 ## Arquitectura
 
-Pipeliner sigue **Arquitectura Hexagonal** (también conocida como Puertos y Adaptadores), organizada en tres capas principales:
+Pipeliner sigue **Arquitectura Hexagonal** (Puertos y Adaptadores) con clara separación de responsabilidades:
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    Capa de Aplicación                       │
-│  (Casos de Uso, Servicios, Orquestación)                    │
-├─────────────────────────────────────────────────────────────┤
-│                      Capa de Dominio                        │
-│  (Entidades, Reglas de Negocio, Interfaces)                 │
-├─────────────────────────────────────────────────────────────┤
-│                  Capa de Infraestructura                    │
-│  (Sistemas Externos, Base de Datos, Clientes HTTP, CLI)     │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│                        Capa de Aplicación                           │
+│   PipelineExecutor │ PluginManager │ ExecutionStrategy              │
+├─────────────────────────────────────────────────────────────────────┤
+│                          Capa de Dominio                             │
+│   Pipeline │ Stage │ Step │ Agent │ Parameters │ Environment        │
+├─────────────────────────────────────────────────────────────────────┤
+│                      Capa de Infraestructura                         │
+│   DockerExecutor │ K8sExecutor │ PodmanExecutor │ CLI │ API REST    │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Capa de Dominio
 
-Contiene la lógica de negocio central y las entidades:
+Entidades del núcleo de negocio:
 
-- `Pipeline`: La estructura principal del pipeline
-- `Stage`: Etapas individuales en un pipeline
-- `Step`: Unidades ejecutables dentro de las etapas
-- `Agent`: Agentes de ejecución que ejecutan pasos
+- **Pipeline**: Estructura principal con stages, parámetros y entorno
+- **Stage**: Stages individuales con ejecución condicional
+- **Step**: Unidades ejecutables (shell, echo, retry, timeout, dir)
+- **Agent**: Objetivos de ejecución (any, docker, kubernetes, podman)
+- **Parameters**: Parámetros de entrada con validación de tipos
 
 ### Capa de Aplicación
 
-Implementa casos de uso y orquesta el dominio:
+Casos de uso y orquestación:
 
-- Orquestación de ejecución de pipelines
-- Gestión de plugins
-- Manejo de artefactos
-- Recuperación de errores
+- **PipelineExecutor**: Ejecuta pipelines con manejo de errores adecuado
+- **PluginRegistry**: Gestiona plugins y extensiones personalizadas
+- **ExecutionStrategy**: Ejecución paralela, secuencial y matricial
 
 ### Capa de Infraestructura
 
-Adaptadores para sistemas externos e interfaces:
+Adaptadores externos:
 
-- Gestión de configuración
-- Interfaz CLI
-- Ejecutores de plugins
-- Adaptadores de almacenamiento
+- **DockerExecutor**: Ejecuta steps en contenedores Docker
+- **K8sExecutor**: Ejecuta en pods de Kubernetes
+- **PodmanExecutor**: Soporte nativo de Podman
+- **API gRPC/REST**: Acceso programático
+- **CLI**: Interfaz de línea de comandos
+
+---
 
 ## Estructura de Crates
 
 ```
-rustline/
-├── src/
-│   ├── cli/                 # Interfaz de línea de comandos
-│   ├── config/              # Gestión de configuración
-│   ├── executor/            # Ejecución de pasos y plugins
-│   ├── pipeline/            # Lógica central del pipeline
-│   └── lib.rs               # Raíz de la biblioteca
+pipeliner/
 ├── crates/
-│   ├── pipeliner-cli/       # Aplicación CLI
-│   └── pipeliner-core/      # Biblioteca principal
-├── tests/                   # Pruebas de integración
-└── docs/                    # Documentación
+│   ├── pipeliner-core/        # Tipos DSL de pipeline y validación
+│   ├── pipeliner-executor/    # Motor de ejecución de pipelines
+│   ├── pipeliner-infrastructure/ # Proveedores Docker, Podman, K8s
+│   ├── pipeliner-worker/      # Programación de trabajos y pool workers
+│   ├── pipeliner-events/      # Infraestructura de event sourcing
+│   ├── pipeliner-api/         # Capa API gRPC y REST
+│   ├── pipeliner-cli/         # Interfaz de línea de comandos
+│   └── pipeliner-macros/      # Macros procedimentales para DSL
+├── docs/                      # Documentación (Español e Inglés)
+│   ├── USER_MANUAL.md
+│   ├── architecture.md
+│   ├── jenkins-sh-compatibility.md
+│   ├── rust-script-integration.md
+│   └── tdd-strategy.md
+├── examples/                  # Ejemplos ejecutables
+│   ├── mi_pipeline.rs         # Ejemplo en español con rust-script
+│   ├── pipeline_example.rs    # Ejemplo de DSL en inglés
+│   ├── docker_test.rs         # Integración Docker
+│   └── podman_test.rs         # Integración Podman
+└── tests/                     # Tests de integración
 ```
 
-## Instalación
+---
 
-### Desde el Código Fuente
+## Suite de Tests
+
+Los 121 tests unitarios pasan en el workspace:
 
 ```bash
-git clone https://github.com/pipeliner-org/pipeliner.git
-cd pipeliner
-cargo build --release
+cd crates && cargo test --workspace
 ```
 
-### Desde Crates.io
+| Crate | Tests | Estado |
+|-------|-------|--------|
+| pipeliner-core | 43 | ✅ |
+| pipeliner-executor | 22 | ✅ |
+| pipeliner-infrastructure | 5 | ✅ |
+| pipeliner-worker | 19 | ✅ |
+| pipeliner-events | 15 | ✅ |
+| pipeliner-api | 10 | ✅ |
+| pipeliner-cli | 7 | ✅ |
+| **Total** | **121** | **✅ Todos pasando** |
 
-```bash
-cargo install pipeliner
-```
-
-## Uso
-
-### Definición Básica de Pipeline
-
-```rust
-use pipeliner::prelude::*;
-
-let pipeline = Pipeline::builder()
-    .name("my-pipeline")
-    .stage(Stage::builder("build")
-        .step(Step::builder("compile")
-            .command("cargo build")
-            .build())
-        .step(Step::builder("test")
-            .command("cargo test")
-            .build())
-        .build())
-    .stage(Stage::builder("deploy")
-        .step(Step::builder("deploy")
-            .command("kubectl apply -f k8s/")
-            .build())
-        .build())
-    .build();
-```
-
-### Ejecutando un Pipeline
-
-```rust
-use pipeliner::executor::PipelineExecutor;
-
-let executor = PipelineExecutor::new();
-executor.execute(&pipeline).await?;
-```
-
-### Usando Plugins
-
-```rust
-use pipeliner::pipeline::plugins::PluginRegistry;
-
-let mut registry = PluginRegistry::default();
-registry.register("docker", DockerPlugin::new());
-registry.register("kubernetes", KubernetesPlugin::new());
-```
+---
 
 ## Configuración
 
-Crea un archivo de configuración `pipeliner.yaml`:
+Crea un `pipeliner.yaml` para configuración avanzada:
 
 ```yaml
 pipeline:
-  name: my-pipeline
-  stages:
-    - name: build
-      steps:
-        - name: compile
-          command: cargo build --release
-        - name: test
-          command: cargo test
+  name: mi-pipeline-ci
+  agent:
+    type: kubernetes
+    image: rust:1.92
+
+stages:
+  - name: build
+    steps:
+      - name: compile
+        type: shell
+        command: cargo build --release
+        retry: 3
 
 execution:
-  concurrency: 4
-  retry:
-    max_attempts: 3
-    delay: 5s
-
-artifacts:
-  path: ./target/pipeliner
-  retention: 7d
+  timeout: 3600
+  parallel:
+    stages:
+      - build
+      - test
 ```
 
-## Contribuyendo
+---
 
-1. Haz un fork del repositorio
-2. Crea una rama de características (`git checkout -b feature/caracteristica-increible`)
-3. Confirma tus cambios (`git commit -m 'feat: añadir caracteristica increíble'`)
-4. Envía la rama (`git push origin feature/caracteristica-increible`)
+## Contribuir
+
+¡Las contribuciones son bienvenidas! Por favor lee nuestras guías de contribución:
+
+1. Haz fork del repositorio
+2. Crea una rama de feature (`git checkout -b feature/caracteristica-increible`)
+3. Commitea tus cambios siguiendo [Conventional Commits](https://www.conventionalcommits.org/)
+4. Push a la rama (`git push origin feature/caracteristica-increible`)
 5. Abre un Pull Request
 
-Por favor, lee [CONTRIBUTING.md](docs/CONTRIBUTING.md) para detalles sobre nuestro código de conducta y proceso de desarrollo.
-
-## Configuración de Desarrollo
+### Configuración de Desarrollo
 
 ```bash
 # Instalar dependencias
-cargo fetch
+cd crates && cargo fetch
 
-# Ejecutar pruebas
-cargo test
+# Ejecutar todos los tests
+cargo test --workspace
 
 # Ejecutar lints
-cargo clippy
+cargo clippy --workspace
 
-# Generar documentación
+# Construir documentación
 cargo doc --no-deps
 ```
 
+---
+
 ## Licencia
 
-Este proyecto está licenciado bajo la Licencia MIT - consulta el archivo [LICENSE](LICENSE) para más detalles.
+Licenciado bajo **MIT OR Apache-2.0**. Ver el archivo [LICENSE](LICENSE) para más detalles.
+
+---
+
+<div align="center">
+
+**Construido con ❤️ usando Rust**
+
+[Repositorio](https://github.com/Rubentxu/pipeliner) · [Issues](https://github.com/Rubentxu/pipeliner/issues)
+
+</div>
