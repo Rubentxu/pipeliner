@@ -4,6 +4,9 @@
 *.pdb
 Cargo.lock
 
+# Workspace crates target
+crates/target/
+
 # IDEs
 .idea/
 .vscode/
@@ -25,3 +28,12 @@ Thumbs.db
 
 # Rustscript
 test_bollard.rs
+
+# Environment files
+.env
+.env.local
+*.local
+
+# Logs
+*.log
+logs/
