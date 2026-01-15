@@ -1,0 +1,45 @@
+[package]
+name = "pipeliner-worker"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92.0"
+description = "Background worker for Pipeliner job processing"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/pipeliner-org/pipeliner"
+documentation = "https://docs.rs/pipeliner-worker"
+keywords = ["worker", "job", "queue"]
+categories = ["development-tools"]
+
+[dependencies]
+pipeliner-core = { path = "../pipeliner-core" }
+pipeliner-executor = { path = "../pipeliner-executor" }
+pipeliner-infrastructure = { path = "../pipeliner-infrastructure" }
+
+tokio = { workspace = true, features = ["rt-multi-thread", "time", "sync"] }
+async-trait = { workspace = true }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+uuid = { workspace = true }
+chrono = { workspace = true }
+dashmap = "6.0"
+parking_lot = { workspace = true }
+
+[dev-dependencies]
+pipeliner-core = { path = "../pipeliner-core" }
+pipeliner-executor = { path = "../pipeliner-executor" }
+tempfile = { workspace = true }
+pretty_assertions = { workspace = true }
+rstest = { workspace = true }
+
+[lib]
+name = "pipeliner_worker"
+path = "src/lib.rs"
+
+[package.metadata.docs.rs]
+all-features = true

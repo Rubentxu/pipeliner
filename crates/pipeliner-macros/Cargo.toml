@@ -1,0 +1,29 @@
+[package]
+name = "pipeliner-macros"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92.0"
+description = "Procedural macros for Pipeliner DSL"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/pipeliner-org/pipeliner"
+documentation = "https://docs.rs/pipeliner-macros"
+keywords = ["macros", "dsl", "procedural"]
+categories = ["development-tools"]
+
+[dependencies]
+proc-macro2 = "1.0"
+quote = "1.0"
+syn = { version = "2.0", features = ["full", "extra-traits"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+trybuild = "1.0"
+predicates = "3.0"
+
+[lib]
+path = "src/lib.rs"
+proc-macro = true
+
+[package.metadata.docs.rs]
+all-features = true

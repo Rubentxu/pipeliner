@@ -1,0 +1,57 @@
+[package]
+name = "pipeliner-executor"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92.0"
+description = "Pipeline execution engine for Pipeliner"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/pipeliner-org/pipeliner"
+documentation = "https://docs.rs/pipeliner-executor"
+keywords = ["pipeline", "executor", "jenkins"]
+categories = ["development-tools"]
+
+[features]
+default = []
+test-support = ["dep:tempfile"]
+
+[dependencies]
+# Workspace dependencies
+pipeliner-core = { path = "../pipeliner-core" }
+
+# Async runtime
+tokio = { workspace = true, features = ["rt-multi-thread", "process"] }
+async-trait = { workspace = true }
+
+# Command execution
+os_pipe = { workspace = true }
+shell-words = { workspace = true }
+tempfile = { workspace = true, optional = true }
+
+# Serialization
+serde_json = "1.0"
+
+# Logging
+tracing = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+# Utilities
+uuid = { workspace = true, features = ["v4", "serde"] }
+chrono = { workspace = true, features = ["serde", "std"] }
+dirs = { workspace = true }
+glob = "0.3"
+
+[dev-dependencies]
+pipeliner-core = { path = "../pipeliner-core" }
+tempfile = { workspace = true }
+pretty_assertions = { workspace = true }
+rstest = { workspace = true }
+
+[lib]
+name = "pipeliner_executor"
+path = "src/lib.rs"
+
+[package.metadata.docs.rs]
+all-features = true

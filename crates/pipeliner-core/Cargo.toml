@@ -1,0 +1,46 @@
+[package]
+name = "pipeliner-core"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92.0"
+description = "Core domain types and Pipeline DSL for Pipeliner"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/pipeliner-org/pipeliner"
+documentation = "https://docs.rs/pipeliner-core"
+keywords = ["pipeline", "dsl", "jenkins", "core"]
+categories = ["development-tools"]
+
+[features]
+default = []
+testing = ["dep:proptest"]
+
+[dependencies]
+# Workspace dependencies
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+tracing = { workspace = true }
+uuid = { workspace = true, features = ["v4", "serde"] }
+chrono = { workspace = true, features = ["serde", "std"] }
+regex = { workspace = true }
+once_cell = { workspace = true }
+
+# Optional dependencies
+proptest = { workspace = true, optional = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+tempfile = { workspace = true }
+pretty_assertions = { workspace = true }
+rstest = { workspace = true }
+proptest = { workspace = true }
+
+[lib]
+name = "pipeliner_core"
+path = "src/lib.rs"
+
+[package.metadata.docs.rs]
+all-features = true

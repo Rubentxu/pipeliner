@@ -1,0 +1,68 @@
+[package]
+name = "pipeliner-infrastructure"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92.0"
+description = "Container runtime infrastructure for Pipeliner"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/pipeliner-org/pipeliner"
+documentation = "https://docs.rs/pipeliner-infrastructure"
+keywords = ["container", "docker", "kubernetes", "infrastructure"]
+categories = ["development-tools"]
+
+[features]
+default = ["podman-native"]
+docker = ["dep:bollard"]
+kubernetes = ["dep:kube", "dep:k8s-openapi"]
+podman = ["dep:reqwest"]
+podman-native = ["dep:reqwest", "dep:hyper"]
+
+[dependencies]
+# Workspace dependencies
+pipeliner-core = { path = "../pipeliner-core" }
+pipeliner-executor = { path = "../pipeliner-executor" }
+
+# Async runtime
+tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
+async-trait = { workspace = true }
+
+# HTTP clients
+reqwest = { workspace = true, optional = true }
+hyper = { workspace = true, optional = true }
+http = { workspace = true }
+
+# Container runtimes
+bollard = { version = "0.15", optional = true, features = ["ssl"] }
+
+# Kubernetes
+kube = { workspace = true, optional = true }
+k8s-openapi = { workspace = true, optional = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+# Utilities
+uuid = { workspace = true }
+regex = { workspace = true }
+url = { workspace = true }
+base64 = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+[dev-dependencies]
+pipeliner-core = { path = "../pipeliner-core" }
+pipeliner-executor = { path = "../pipeliner-executor" }
+tempfile = { workspace = true }
+pretty_assertions = { workspace = true }
+rstest = { workspace = true }
+
+[lib]
+name = "pipeliner_infrastructure"
+path = "src/lib.rs"
+
+[package.metadata.docs.rs]
+all-features = true

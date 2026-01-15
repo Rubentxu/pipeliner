@@ -1,0 +1,46 @@
+[package]
+name = "pipeliner-cli"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92.0"
+description = "Command-line interface for Pipeliner"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/pipeliner-org/pipeliner"
+documentation = "https://docs.rs/pipeliner-cli"
+keywords = ["cli", "pipeline", "jenkins", "dsl"]
+categories = ["development-tools", "command-line-utilities"]
+
+[dependencies]
+pipeliner-core = { path = "../pipeliner-core" }
+pipeliner-executor = { path = "../pipeliner-executor" }
+pipeliner-worker = { path = "../pipeliner-worker" }
+pipeliner-api = { path = "../pipeliner-api" }
+pipeliner-events = { path = "../pipeliner-events" }
+
+clap = { workspace = true, features = ["derive", "cargo"] }
+clap_complete = { workspace = true }
+clap_mangen = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "sync"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+anyhow = { workspace = true }
+dirs = { workspace = true }
+
+[dev-dependencies]
+pipeliner-core = { path = "../pipeliner-core" }
+assert_cmd = "2.0"
+predicates = "3.0"
+tempfile = { workspace = true }
+
+[lib]
+name = "pipeliner_cli"
+path = "src/lib.rs"
+
+[package.metadata.docs.rs]
+all-features = true
