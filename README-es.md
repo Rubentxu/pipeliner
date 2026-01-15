@@ -251,26 +251,27 @@ pipeline {
 }
 ```
 
-**Pipeliner (Rust):**
+**Pipeliner (Rust DSL):**
 ```rust
 use pipeliner_core::prelude::*;
 
-let pipeline = Pipeline::new()
-    .with_agent(AgentType::any())
-    .with_environment(Environment::from([
-        ("VERSION", "1.0.0"),
-    ]))
-    .with_parameters(Parameters::from([
-        ParameterType::string("TARGET", "production"),
-    ]))
-    .with_stage(
-        Stage::new("Build")
-            .with_step(Step::shell("cargo build --release"))
-    )
-    .with_stage(
-        Stage::new("Test")
-            .with_step(Step::shell("cargo test"))
-    );
+let pipeline = pipeline! {
+    agent { any() }
+    environment {
+        ("VERSION", "1.0.0")
+    }
+    parameters {
+        string("TARGET", "production")
+    }
+    stages {
+        stage!("Build", steps!(
+            sh!("cargo build --release")
+        ))
+        stage!("Test", steps!(
+            sh!("cargo test")
+        ))
+    }
+};
 ```
 
 ### Stages y Steps
@@ -297,18 +298,22 @@ stage('Deploy') {
 
 **Pipeliner:**
 ```rust
-Stage::new("Deploy")
-    .with_step(
-        Step::timeout(
-            std::time::Duration::from_secs(300),
-            Step::retry(3, Step::shell("./deploy.sh"))
-        )
-    )
-    .with_post(PostActions {
-        on_success: Some(Step::echo("¡Desplegado!")),
-        on_failure: Some(Step::echo("¡Fallo!")),
-        ..Default::default()
-    })
+use pipeliner_core::prelude::*;
+
+let deploy_stage = stage!("Deploy", steps!(
+    timeout!(300, retry!(3, sh!("./deploy.sh")))
+));
+
+let pipeline = pipeline! {
+    agent { docker("rust:latest") }
+    stages {
+        deploy_stage
+    }
+    post {
+        success(echo!("¡Desplegado!")),
+        failure(echo!("¡Fallo!"))
+    }
+};
 ```
 
 ### Ventajas Clave de Pipeliner
