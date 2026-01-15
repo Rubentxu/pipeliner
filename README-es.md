@@ -19,10 +19,11 @@ Pipeliner es una **biblioteca de orquestación de pipelines type-safe** escrita 
 
 ### Características Principales
 
-- **DSL Compatible con Jenkins**: Define pipelines usando las macros familiares `pipeline!`, `stage!`, y `steps!`
+- **Diseño DSL-First**: Define pipelines con intuitivas macros `pipeline!`, `stage!`, y `steps!` - sin necesidad de configurar executors
+- **Ejecución Zero-Config**: Usa las macros `run!` o `run_sync!` para ejecutar pipelines inmediatamente
 - **Type Safety**: Todas las definiciones de pipelines se validan en tiempo de compilación
-- **Ejecución Multi-Backend**: Ejecuta pipelines localmente, en Docker, Kubernetes o Podman
-- **Arquitectura Hexagonal**: Separación clara entre dominio, aplicación e infraestructura
+- **Compatibilidad Jenkins**: Sintaxis familiar para usuarios de Jenkins, con las garantías de seguridad de Rust
+- **Ejecución Multi-Backend**: Ejecuta localmente, en Docker, Kubernetes, o Podman sin problemas
 - **Integración con Rust-Script**: Ejecuta pipelines directamente con `rust-script` para máxima portabilidad
 - **Event Sourcing**: Almacén de eventos y bus de eventos integrado para observabilidad
 - **Sistema de Plugins Extensible**: Añade steps personalizados, agentes y ejecutores
@@ -54,14 +55,11 @@ Crea un archivo llamado `mi_pipeline.rs`:
 //! Ejecutar con: rust-script mi_pipeline.rs
 //!
 
-use rustline::LocalExecutor;
-use rustline::prelude::*;
+use pipeliner_core::prelude::*;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() {
     let pipeline = pipeline! {
-        agent {
-            docker("rust:latest")
-        }
+        agent { any() }
         stages {
             stage!("Checkout", steps!(
                 echo!("📦 Clonando repositorio..."),
@@ -86,9 +84,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    let executor = LocalExecutor::new();
-    executor.execute(&pipeline)?;
-    Ok(())
+    run!(pipeline);  // ¡No necesitas executor - la macro lo maneja todo!
 }
 ```
 
@@ -98,108 +94,139 @@ Ejecútalo:
 rust-script mi_pipeline.rs
 ```
 
+> **Nota:** La macro `run!` crea automáticamente un `LocalExecutor`, ejecuta tu pipeline y maneja errores. Para contextos no-async, usa `run_sync!(pipeline)`.
+
 ---
 
-## Ejecución Simplificada de Pipelines
+## DSL de Pipeline
 
-Pipeliner proporciona una API simplificada para ejecución rápida de pipelines sin configuración verbosa.
+El Domain Specific Language (DSL) de Pipeliner te permite definir pipelines con intuitivas macros de Rust. El DSL es **recomendado** para la mayoría de casos de uso - es conciso, expresivo y no requiere configuración de executors.
 
-### Usando la Macro `run!` (Async)
+### Macros Principales
 
-Ejecuta pipelines inmediatamente con manejo automático de errores:
+| Macro | Descripción |
+|-------|-------------|
+| `pipeline!` | Define un pipeline completo con agentes, stages y post-actions |
+| `stage!` | Define un stage con uno o más steps |
+| `steps!` | Agrupa múltiples steps juntos |
+| `sh!` | Ejecuta un comando shell |
+| `echo!` | Imprime un mensaje |
+| `retry!` | Reintenta un step N veces |
+| `timeout!` | Ejecuta con timeout |
+| `dir!` | Ejecuta steps en un directorio |
+| `run!` | Ejecuta un pipeline (async) |
+| `run_sync!` | Ejecuta un pipeline (bloqueante) |
 
-```rust
-use pipeliner_core::prelude::*;
-
-let pipeline = Pipeline::new()
-    .with_agent(AgentType::any())
-    .with_stage(
-        Stage::new("Build")
-            .with_agent(AgentType::docker("rust:latest"))
-            .with_step(Step::shell("cargo build --release"))
-    )
-    .with_stage(
-        Stage::new("Test")
-            .with_step(Step::shell("cargo test"))
-    );
-
-run!(pipeline); // Ejecuta y sale con código 1 en caso de fallo
-```
-
-### Usando la Macro `run_sync!` (Bloqueante)
-
-Para contextos no-async, usa la variante bloqueante:
+### Ejemplo Completo de Pipeline
 
 ```rust
 use pipeliner_core::prelude::*;
 
-let pipeline = Pipeline::new()
-    .with_agent(AgentType::any())
-    .with_stage(
-        Stage::new("Build")
-            .with_step(Step::shell("cargo build"))
-    );
+let pipeline = pipeline! {
+    agent { docker("rust:1.92") }
+    environment {
+        ("RELEASE", "true"),
+        ("LOG_LEVEL", "debug")
+    }
+    parameters {
+        string("VERSION", "1.0.0"),
+        boolean("DEPLOY_ENABLED", false)
+    }
+    stages {
+        stage!("Build", steps!(
+            echo!("📦 Compilando aplicación..."),
+            sh!("cargo build --release"),
+            echo!("✅ Compilación completa!")
+        ))
+        stage!("Test", steps!(
+            echo!("🧪 Ejecutando tests..."),
+            sh!("cargo test --lib"),
+            sh!("cargo test --doc")
+        ))
+        stage!("Deploy", steps!(
+            echo!("🚀 Desplegando a producción..."),
+            sh!("./deploy.sh ${VERSION}"),
+            echo!("✅ Despliegue completo!")
+        ))
+    }
+    post {
+        success(echo!("🎉 Pipeline exitoso!")),
+        failure(echo!("❌ Pipeline fallido!")),
+        always(echo!("📊 Ejecución finalizada"))
+    }
+};
 
-run_sync!(pipeline); // Usa tokio runtime internamente
+run!(pipeline);  // Ejecuta con manejo automático de errores
 ```
 
-### Usando LocalExecutor Directamente
-
-Para más control, usa `LocalExecutor` directamente:
+### Tipos de Steps
 
 ```rust
-use pipeliner_executor::LocalExecutor;
-use pipeliner_core::{Pipeline, Stage, Step, AgentType};
+use pipeliner_core::prelude::*;
 
-#[tokio::main]
-async fn main() {
-    let pipeline = Pipeline::new()
-        .with_name("Mi Pipeline")
-        .with_agent(AgentType::any())
-        .with_stage(
-            Stage::new("Build")
-                .with_step(Step::echo("Iniciando build..."))
-                .with_step(Step::shell("cargo build").with_retry(3))
-        )
-        .with_stage(
-            Stage::new("Test")
-                .with_step(Step::shell("cargo test"))
-        );
+let stage = stage!("Ejemplo de Stage", steps!(
+    // Imprime un mensaje
+    echo!("Este es un mensaje informativo"),
 
-    let executor = LocalExecutor::new();
-    let results = executor.execute(&pipeline).await;
+    // Ejecuta comando shell
+    sh!("cargo build --release"),
 
-    for result in &results {
-        println!("[{}] {} - {}", result.stage, result.success, result.output);
+    // Reintenta step fallido (3 intentos)
+    retry!(3, sh!("comando-inestable")),
+
+    // Timeout después de 5 minutos
+    timeout!(300, sh!("tarea-larga")),
+
+    // Ejecuta en directorio
+    dir!("./scripts", steps!(
+        sh!("./setup.sh"),
+        sh!("./run.sh")
+    ))
+));
+```
+
+### Post-Condiciones
+
+```rust
+pipeline! {
+    agent { any() }
+    stages {
+        stage!("Build", steps!(sh!("cargo build")))
+    }
+    post {
+        always(echo!("Siempre ejecuta - limpieza, notificaciones, etc.")),
+        success(echo!("Ejecuta cuando el pipeline es exitoso")),
+        failure(echo!("Ejecuta cuando el pipeline falla")),
+        unstable(echo!("Ejecuta cuando el pipeline es inestable"))
     }
 }
 ```
 
-### API con Patrón Builder
-
-Todos los tipos principales soportan métodos builder para construcción fluida de pipelines:
+### Parámetros y Entorno
 
 ```rust
-use pipeliner_core::{Pipeline, Stage, Step, AgentType};
+use pipeliner_core::prelude::*;
 
-let pipeline = Pipeline::builder()
-    .name("Mi Pipeline")
-    .description("Un pipeline de prueba")
-    .with_agent(AgentType::docker("rust:1.92"))
-    .with_stage(
-        Stage::new("Build")
-            .with_agent(AgentType::any()) // Sobrescribir agent del stage
-            .with_step(
-                Step::shell("cargo build --release")
-                    .with_name("build-release")
-                    .with_timeout(std::time::Duration::from_secs(300))
-            )
-    )
-    .with_stage(
-        Stage::new("Test")
-            .with_step(Step::shell("cargo test").with_retry(2))
-    )
-    .build();
+let pipeline = pipeline! {
+    agent { any() }
+    environment {
+        ("DATABASE_URL", "postgres://localhost:5432/db"),
+        ("CACHE_TTL", "3600")
+    }
+    parameters {
+        string("VERSION", "1.0.0"),
+        boolean("SKIP_TESTS", false),
+        choice("ENVIRONMENT", ["dev", "staging", "production"])
+    }
+    stages {
+        stage!("Deploy", steps!(
+            sh!("echo Desplegando ${VERSION} en ${ENVIRONMENT}"),
+            sh!("./deploy.sh ${VERSION} ${ENVIRONMENT}")
+        ))
+    }
+};
+
+run_sync!(pipeline);  // Ejecución bloqueante para scripts
 ```
 
 ---
@@ -538,6 +565,83 @@ execution:
       - build
       - test
 ```
+
+---
+
+## Anexo: API Programática
+
+Aunque el **DSL es recomendado** para la mayoría de casos de uso, Pipeliner también proporciona una API programática para casos de uso avanzados que requieren control detallado.
+
+### Usando LocalExecutor Directamente
+
+Para escenarios que requieren manejo de ejecución personalizado:
+
+```rust
+use pipeliner_executor::LocalExecutor;
+use pipeliner_core::{Pipeline, Stage, Step, AgentType};
+
+#[tokio::main]
+async fn main() {
+    let pipeline = Pipeline::builder()
+        .name("Mi Pipeline")
+        .with_agent(AgentType::any())
+        .with_stage(
+            Stage::new("Build")
+                .with_step(Step::echo("Iniciando build..."))
+                .with_step(Step::shell("cargo build").with_retry(3))
+        )
+        .build();
+
+    let executor = LocalExecutor::new();
+    let results = executor.execute(&pipeline).await;
+
+    for result in &results {
+        println!("[{}] {} - {}", result.stage, result.success, result.output);
+    }
+
+    // Verificar si todos los steps fueron exitosos
+    let todos_exitos = results.iter().all(|r| r.success);
+    if todos_exitos {
+        println!("✅ Pipeline completado exitosamente!");
+    }
+}
+```
+
+### API con Patrón Builder
+
+Todos los tipos principales soportan métodos builder para construcción programática:
+
+```rust
+use pipeliner_core::{Pipeline, Stage, Step, AgentType};
+
+let pipeline = Pipeline::builder()
+    .name("Mi Pipeline")
+    .description("Un pipeline de prueba")
+    .with_agent(AgentType::docker("rust:1.92"))
+    .with_stage(
+        Stage::new("Build")
+            .with_agent(AgentType::any()) // Sobrescribir agent del stage
+            .with_step(
+                Step::shell("cargo build --release")
+                    .with_name("build-release")
+                    .with_timeout(std::time::Duration::from_secs(300))
+            )
+    )
+    .with_stage(
+        Stage::new("Test")
+            .with_step(Step::shell("cargo test").with_retry(2))
+    )
+    .build();
+```
+
+### Cuándo Usar API Programática
+
+- Implementaciones de executor personalizadas
+- Generación dinámica de pipelines basada en configuración
+- Integración con frameworks async existentes
+- Control detallado sobre resultados de ejecución
+
+Para la mayoría de pipelines, el DSL con las macros `run!` o `run_sync!` es más simple y recomendado.
 
 ---
 
