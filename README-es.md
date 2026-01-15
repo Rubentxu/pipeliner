@@ -204,6 +204,155 @@ let pipeline = Pipeline::builder()
 
 ---
 
+## Pipeliner vs Jenkins Pipeline DSL
+
+Pipeliner proporciona una alternativa nativa en Rust a Jenkins Pipeline con ventajas significativas:
+
+### Comparación de Sintaxis
+
+| Característica | Jenkins Pipeline | Pipeliner |
+|----------------|------------------|-----------|
+| **Lenguaje** | DSL basado en Groovy | Rust nativo |
+| **Type Safety** | Tipado dinámico | Verificación de tipos en tiempo de compilación |
+| **Soporte IDE** | Limitado | Soporte completo Rust (IntelliJ, VSCode) |
+| **Testing** | Scripted, limitado | TDD/BDD con testing nativo de Rust |
+| **Ejecución** | Solo JVM | Cualquier runtime de Rust (local, Docker, K8s) |
+| **Dependencias** | Jenkins + plugins | Sin dependencias externas |
+
+### Definición de Pipeline
+
+**Jenkins Pipeline (Groovy):**
+```groovy
+pipeline {
+    agent any
+    environment {
+        VERSION = '1.0.0'
+    }
+    parameters {
+        string(name: 'TARGET', defaultValue: 'production')
+    }
+    stages {
+        stage('Build') {
+            steps {
+                sh 'cargo build --release'
+            }
+        }
+        stage('Test') {
+            steps {
+                sh 'cargo test'
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: '**/target/**', allowEmptyArchive: true
+                }
+            }
+        }
+    }
+}
+```
+
+**Pipeliner (Rust):**
+```rust
+use pipeliner_core::prelude::*;
+
+let pipeline = Pipeline::new()
+    .with_agent(AgentType::any())
+    .with_environment(Environment::from([
+        ("VERSION", "1.0.0"),
+    ]))
+    .with_parameters(Parameters::from([
+        ParameterType::string("TARGET", "production"),
+    ]))
+    .with_stage(
+        Stage::new("Build")
+            .with_step(Step::shell("cargo build --release"))
+    )
+    .with_stage(
+        Stage::new("Test")
+            .with_step(Step::shell("cargo test"))
+    );
+```
+
+### Stages y Steps
+
+**Jenkins:**
+```groovy
+stage('Deploy') {
+    when {
+        branch 'main'
+    }
+    steps {
+        timeout(time: 5, unit: 'MINUTES') {
+            retry(3) {
+                sh './deploy.sh'
+            }
+        }
+    }
+    post {
+        success { echo '¡Desplegado!' }
+        failure { echo '¡Fallo!' }
+    }
+}
+```
+
+**Pipeliner:**
+```rust
+Stage::new("Deploy")
+    .with_step(
+        Step::timeout(
+            std::time::Duration::from_secs(300),
+            Step::retry(3, Step::shell("./deploy.sh"))
+        )
+    )
+    .with_post(PostActions {
+        on_success: Some(Step::echo("¡Desplegado!")),
+        on_failure: Some(Step::echo("¡Fallo!")),
+        ..Default::default()
+    })
+```
+
+### Ventajas Clave de Pipeliner
+
+| Aspecto | Beneficio |
+|---------|-----------|
+| **Type Safety** | Errores detectados en compilación, no en ejecución |
+| **Rendimiento** | Ejecución nativa Rust, sin overhead de JVM |
+| **Testing** | Tests unitarios/integración con `cargo test` |
+| **Portabilidad** | Ejecuta pipelines donde Rust se ejecute |
+| **Tooling** | Usa el ecosistema Rust (cargo, clippy, rust-analyzer) |
+| **Seguridad** | Garantías de seguridad de memoria, sin excepciones puntero nulo |
+| **Concurrencia** | Concurrencia async/await sin miedos |
+| **Versioning** | Versionado semántico de definiciones de pipeline |
+
+### Migración desde Jenkins
+
+Pipeliner está diseñado para ser familiar para usuarios de Jenkins mientras proporciona beneficios de Rust:
+
+```rust
+// Jenkins: agent any
+AgentType::any()
+
+// Jenkins: agent { docker 'rust:latest' }
+AgentType::docker("rust:latest")
+
+// Jenkins: sh 'comando'
+Step::shell("comando")
+
+// Jenkins: echo 'mensaje'
+Step::echo("mensaje")
+
+// Jenkins: timeout(time: 10, unit: 'MINUTES') { ... }
+Step::timeout(std::time::Duration::from_secs(600), step_interno)
+
+// Jenkins: retry(3) { ... }
+Step::retry(3, step_interno)
+
+// Jenkins: dir('ruta') { ... }
+Step::dir(PathBuf::from("ruta"), step_interno)
+```
+
+---
+
 ## Referencia del DSL
 
 ### Definición de Pipeline

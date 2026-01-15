@@ -204,6 +204,155 @@ let pipeline = Pipeline::builder()
 
 ---
 
+## Pipeliner vs Jenkins Pipeline DSL
+
+Pipeliner provides a Rust-native alternative to Jenkins Pipeline with significant advantages:
+
+### Syntax Comparison
+
+| Feature | Jenkins Pipeline | Pipeliner |
+|---------|------------------|-----------|
+| **Language** | Groovy-based DSL | Native Rust |
+| **Type Safety** | Dynamic typing | Full compile-time type checking |
+| **IDE Support** | Limited | Full Rust IDE support (IntelliJ, VSCode) |
+| **Testing** | Scripted, limited | TDD/BDD with native Rust testing |
+| **Execution** | JVM only | Any Rust runtime (local, Docker, K8s) |
+| **Dependencies** | Jenkins + plugins | No external dependencies |
+
+### Pipeline Definition
+
+**Jenkins Pipeline (Groovy):**
+```groovy
+pipeline {
+    agent any
+    environment {
+        VERSION = '1.0.0'
+    }
+    parameters {
+        string(name: 'TARGET', defaultValue: 'production')
+    }
+    stages {
+        stage('Build') {
+            steps {
+                sh 'cargo build --release'
+            }
+        }
+        stage('Test') {
+            steps {
+                sh 'cargo test'
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: '**/target/**', allowEmptyArchive: true
+                }
+            }
+        }
+    }
+}
+```
+
+**Pipeliner (Rust):**
+```rust
+use pipeliner_core::prelude::*;
+
+let pipeline = Pipeline::new()
+    .with_agent(AgentType::any())
+    .with_environment(Environment::from([
+        ("VERSION", "1.0.0"),
+    ]))
+    .with_parameters(Parameters::from([
+        ParameterType::string("TARGET", "production"),
+    ]))
+    .with_stage(
+        Stage::new("Build")
+            .with_step(Step::shell("cargo build --release"))
+    )
+    .with_stage(
+        Stage::new("Test")
+            .with_step(Step::shell("cargo test"))
+    );
+```
+
+### Stages and Steps
+
+**Jenkins:**
+```groovy
+stage('Deploy') {
+    when {
+        branch 'main'
+    }
+    steps {
+        timeout(time: 5, unit: 'MINUTES') {
+            retry(3) {
+                sh './deploy.sh'
+            }
+        }
+    }
+    post {
+        success { echo 'Deployed!' }
+        failure { echo 'Failed!' }
+    }
+}
+```
+
+**Pipeliner:**
+```rust
+Stage::new("Deploy")
+    .with_step(
+        Step::timeout(
+            std::time::Duration::from_secs(300),
+            Step::retry(3, Step::shell("./deploy.sh"))
+        )
+    )
+    .with_post(PostActions {
+        on_success: Some(Step::echo("Deployed!")),
+        on_failure: Some(Step::echo("Failed!")),
+        ..Default::default()
+    })
+```
+
+### Key Advantages of Pipeliner
+
+| Aspect | Benefit |
+|--------|---------|
+| **Type Safety** | Catch errors at compile time, not runtime |
+| **Performance** | Native Rust execution, no JVM overhead |
+| **Testing** | Write unit/integration tests with `cargo test` |
+| **Portability** | Run pipelines anywhere Rust runs |
+| **Tooling** | Use Rust's ecosystem (cargo, clippy, rust-analyzer) |
+| **Safety** | Memory safety guarantees, no null pointer exceptions |
+| **Concurrency** | Fearless async/await concurrency |
+| **Versioning** | Semantic versioning of pipeline definitions |
+
+### Migration from Jenkins
+
+Pipeliner is designed to be familiar to Jenkins users while providing Rust benefits:
+
+```rust
+// Jenkins: agent any
+AgentType::any()
+
+// Jenkins: agent { docker 'rust:latest' }
+AgentType::docker("rust:latest")
+
+// Jenkins: sh 'command'
+Step::shell("command")
+
+// Jenkins: echo 'message'
+Step::echo("message")
+
+// Jenkins: timeout(time: 10, unit: 'MINUTES') { ... }
+Step::timeout(std::time::Duration::from_secs(600), inner_step)
+
+// Jenkins: retry(3) { ... }
+Step::retry(3, inner_step)
+
+// Jenkins: dir('path') { ... }
+Step::dir(PathBuf::from("path"), inner_step)
+```
+
+---
+
 ## DSL Reference
 
 ### Pipeline Definition
