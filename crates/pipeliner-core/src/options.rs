@@ -3,6 +3,7 @@
 //! This module provides types for configuring pipeline execution
 //! options like timeouts, retries, and triggers.
 
+use crate::logging::LogLevel;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -34,6 +35,9 @@ pub struct PipelineOptions {
     /// Checkout to subdirectory
     #[serde(skip_serializing_if = "Option::is_none")]
     pub checkout_dir: Option<String>,
+    /// Log level for pipeline execution
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub log_level: Option<LogLevel>,
 }
 
 /// Timeout configuration
@@ -235,6 +239,13 @@ impl PipelineOptions {
         self
     }
 
+    /// Sets the log level
+    #[must_use]
+    pub fn with_log_level(mut self, log_level: LogLevel) -> Self {
+        self.log_level = Some(log_level);
+        self
+    }
+
     /// Blocks downstream jobs
     #[must_use]
     pub fn block_downstream(mut self) -> Self {
@@ -373,5 +384,77 @@ mod tests {
         } else {
             panic!("Expected Cron variant");
         }
+    }
+
+    // =======================================================================
+    // Log Level Tests (PipelineOptions::log_level)
+    // =======================================================================
+
+    #[test]
+    fn test_pipeline_options_log_level_default_is_none() {
+        // Default log_level should be None (which means Info in practice)
+        let options = PipelineOptions::new();
+        assert!(options.log_level.is_none());
+    }
+
+    #[test]
+    fn test_pipeline_options_with_log_level() {
+        use crate::logging::LogLevel;
+
+        let options = PipelineOptions::new().with_log_level(LogLevel::Debug);
+        assert_eq!(options.log_level, Some(LogLevel::Debug));
+    }
+
+    #[test]
+    fn test_pipeline_options_log_level_serialization() {
+        use crate::logging::LogLevel;
+
+        let options = PipelineOptions::new().with_log_level(LogLevel::Warn);
+        let json = serde_json::to_string(&options).unwrap();
+
+        // Should contain "logLevel" field with "warn" value
+        assert!(json.contains("\"logLevel\":\"warn\""));
+    }
+
+    #[test]
+    fn test_pipeline_options_log_level_deserialization() {
+        use crate::logging::LogLevel;
+
+        let json = r#"{"logLevel":"error"}"#;
+        let options: PipelineOptions = serde_json::from_str(json).unwrap();
+        assert_eq!(options.log_level, Some(LogLevel::Error));
+    }
+
+    #[test]
+    fn test_pipeline_options_log_level_none_serialization() {
+        // When log_level is None, it should not appear in JSON (due to skip_serializing_if)
+        let options = PipelineOptions::new();
+        let json = serde_json::to_string(&options).unwrap();
+
+        // Should NOT contain "logLevel" field
+        assert!(!json.contains("logLevel"));
+    }
+
+    #[test]
+    fn test_pipeline_options_log_level_roundtrip() {
+        use crate::logging::LogLevel;
+
+        let original = PipelineOptions::new()
+            .with_timeout(Timeout::duration(3600))
+            .with_log_level(LogLevel::Error);
+
+        let json = serde_json::to_string(&original).unwrap();
+        let parsed: PipelineOptions = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed.log_level, original.log_level);
+        assert_eq!(parsed.timeout, original.timeout);
+    }
+
+    #[test]
+    fn test_pipeline_options_with_log_level_via_builder() {
+        use crate::logging::LogLevel;
+
+        let options = PipelineOptions::new().with_log_level(LogLevel::Fatal);
+        assert_eq!(options.log_level, Some(LogLevel::Fatal));
     }
 }

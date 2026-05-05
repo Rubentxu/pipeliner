@@ -71,21 +71,31 @@
 #![warn(clippy::pedantic)]
 
 pub mod agent;
+pub mod config;
+pub mod context;
 pub mod environment;
+pub mod logging;
 pub mod matrix;
 pub mod options;
 pub mod parameters;
 pub mod pipeline;
 pub mod prelude;
+pub mod registry;
+pub mod runtime;
 pub mod validation;
 
 // Re-exports for common use
 pub use agent::{AgentConfig, AgentType, DockerConfig, KubernetesConfig, PodmanConfig};
+pub use config::{ConfigError, CredentialConfig, CredentialType, LibraryConfig, LibraryModule, PipelineConfig, PipelineSpec, RetrieverType, ScmConfig};
 pub use environment::{Environment, VariableResolver};
+pub use logging::LogLevel;
 pub use matrix::{MatrixAxis, MatrixConfig, MatrixExclude};
 pub use options::{PipelineOptions, Retry, Timeout, Trigger};
 pub use parameters::{ParameterType, Parameters};
-pub use pipeline::{Pipeline, Stage, Step, StepType};
+pub use pipeline::{Pipeline, Stage, Step, StepType, StepWhenCondition, EnvCheck};
+pub use context::PipelineContext;
+pub use registry::{CustomStep, StepError, StepFactory, StepRegistry};
+pub use runtime::{LifecyclePhase, PhaseResult, PipelineRuntime, PipelineRunResult, RuntimeError};
 pub use validation::{Validate, ValidationError, ValidationResult};
 
 // Version

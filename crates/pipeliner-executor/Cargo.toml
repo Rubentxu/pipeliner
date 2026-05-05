@@ -17,6 +17,7 @@ test-support = ["dep:tempfile"]
 [dependencies]
 # Workspace dependencies
 pipeliner-core = { path = "../pipeliner-core" }
+pipeliner-events = { path = "../pipeliner-events" }
 
 # Async runtime
 tokio = { workspace = true, features = ["rt-multi-thread", "process"] }

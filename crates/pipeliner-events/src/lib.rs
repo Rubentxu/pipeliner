@@ -24,12 +24,15 @@
 
 pub mod event_bus;
 pub mod event_store;
+pub mod markers;
 pub mod types;
 
 pub use event_bus::{EventBus, EventHandler, LocalEventBus};
 pub use event_store::{EventStore, InMemoryEventStore, InMemorySnapshotStore, SnapshotStore};
+pub use markers::{StageMarkerEmitter, StageMarkerParser, STAGE_MARKER_PREFIX};
 pub use types::{
     AnyEvent, EventEnvelope, EventMetadata, InfrastructureEvent, PipelineEvent, WorkerEvent,
+    StageMarker, StageResult,
 };
 
 /// Event errors

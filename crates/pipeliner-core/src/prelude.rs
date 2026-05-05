@@ -31,7 +31,7 @@
 macro_rules! run {
     ($pipeline:expr) => {{
         use pipeliner_executor::LocalExecutor;
-        let executor = LocalExecutor::new();
+        let mut executor = LocalExecutor::new();
         let results = executor.execute(&$pipeline).await;
         let success = results.iter().all(|r| r.success);
         if !success {
@@ -50,7 +50,7 @@ macro_rules! run_sync {
         let rt = tokio::runtime::Runtime::new().unwrap();
         rt.block_on(async {
             use pipeliner_executor::LocalExecutor;
-            let executor = LocalExecutor::new();
+            let mut executor = LocalExecutor::new();
             let results = executor.execute(&$pipeline).await;
             let success = results.iter().all(|r| r.success);
             if !success {
@@ -62,9 +62,13 @@ macro_rules! run_sync {
 }
 
 pub use crate::agent::{AgentConfig, AgentType, DockerConfig, KubernetesConfig, PodmanConfig};
+pub use crate::config::{ConfigError, CredentialConfig, CredentialType, LibraryConfig, LibraryModule, PipelineConfig, PipelineSpec, RetrieverType, ScmConfig};
+pub use crate::context::PipelineContext;
 pub use crate::environment::{Environment, VariableResolver};
+pub use crate::logging::LogLevel;
 pub use crate::matrix::{MatrixAxis, MatrixConfig, MatrixExclude};
 pub use crate::options::{PipelineOptions, Retry, Timeout, Trigger};
 pub use crate::parameters::{ParameterType, Parameters};
 pub use crate::pipeline::{Pipeline, Stage, Step, StepType};
+pub use crate::registry::{CustomStep, StepError, StepFactory, StepRegistry};
 pub use crate::validation::{Validate, ValidationError, ValidationResult};

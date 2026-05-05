@@ -99,6 +99,8 @@ pub enum ExecutionStatus {
     Aborted,
     /// Unstable (some failures but not critical)
     Unstable,
+    /// Skipped (condition not met)
+    Skipped,
 }
 
 impl Default for ExecutionStatus {

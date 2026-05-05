@@ -1,0 +1,16 @@
+[package]
+name = "pipeliner-steps-tooling"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92.0"
+description = "Tooling (asdf) step tool for Pipeliner"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+pipeliner-core = { path = "../pipeliner-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }

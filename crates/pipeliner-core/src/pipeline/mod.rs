@@ -1,6 +1,7 @@
 //! Pipeline definition types and builders.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -213,6 +214,107 @@ pub struct TagCondition {
     pub comparator: String,
 }
 
+/// Condition for conditional step execution
+///
+/// This is a recursive enum that supports:
+/// - Direct boolean expressions
+/// - Negation (Not)
+/// - Logical OR (Any)
+/// - Logical AND (All)
+/// - Environment variable checks (EnvEqual)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StepWhenCondition {
+    /// Direct boolean expression
+    Expr(bool),
+
+    /// Negation of a condition
+    Not(Box<StepWhenCondition>),
+
+    /// True if any child condition is true (OR)
+    Any(Vec<StepWhenCondition>),
+
+    /// True if all child conditions are true (AND)
+    All(Vec<StepWhenCondition>),
+
+    /// Check if an environment variable equals a specific value
+    EnvEqual { key: String, value: String },
+}
+
+impl StepWhenCondition {
+    /// Evaluates the condition against the given environment
+    #[must_use]
+    pub fn evaluate(&self, env: &Environment) -> bool {
+        match self {
+            StepWhenCondition::Expr(b) => *b,
+            StepWhenCondition::Not(inner) => !inner.evaluate(env),
+            StepWhenCondition::Any(conditions) => conditions.iter().any(|c| c.evaluate(env)),
+            StepWhenCondition::All(conditions) => conditions.iter().all(|c| c.evaluate(env)),
+            StepWhenCondition::EnvEqual { key, value } => env
+                .get(key)
+                .and_then(|v| {
+                    if let crate::environment::EnvVarValue::Value(v_str) = v {
+                        Some(v_str == value)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(false),
+        }
+    }
+}
+
+/// Environment check for the `is` step type
+///
+/// Used to conditionally execute steps based on the current environment.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum EnvCheck {
+    /// Check if running in integration environment
+    Integration,
+
+    /// Check if running in certification environment
+    Certification,
+
+    /// Check if running in preproduction environment
+    Preproduction,
+
+    /// Check if running in production environment
+    Production,
+
+    /// Custom environment check with explicit key and value
+    Custom { key: String, value: String },
+}
+
+impl EnvCheck {
+    /// The environment variable name used to identify the environment
+    const ENV_KEY: &'static str = "DEPLOY_ENV";
+
+    /// Helper to extract string value from EnvVarValue
+    fn get_string_value(env: &Environment, key: &str) -> Option<String> {
+        env.get(key).and_then(|v| {
+            if let crate::environment::EnvVarValue::Value(v_str) = v {
+                Some(v_str.clone())
+            } else {
+                None
+            }
+        })
+    }
+
+    /// Checks if the environment matches this EnvCheck variant
+    #[must_use]
+    pub fn check(&self, env: &Environment) -> bool {
+        let env_value = Self::get_string_value(env, Self::ENV_KEY);
+        match self {
+            EnvCheck::Integration => env_value.map(|v| v == "integration").unwrap_or(false),
+            EnvCheck::Certification => env_value.map(|v| v == "certification").unwrap_or(false),
+            EnvCheck::Preproduction => env_value.map(|v| v == "preproduction").unwrap_or(false),
+            EnvCheck::Production => env_value.map(|v| v == "production").unwrap_or(false),
+            EnvCheck::Custom { key, value } => Self::get_string_value(env, key).map(|v| v == *value).unwrap_or(false),
+        }
+    }
+}
+
 /// Post-condition for stage completion
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -336,6 +438,66 @@ pub enum StepType {
         name: String,
         /// Configuration
         config: serde_json::Value,
+    },
+
+    /// Log message at a specific level
+    Log {
+        /// Log level for this message
+        level: crate::logging::LogLevel,
+        /// Message to log
+        message: String,
+    },
+
+    /// Conditional step execution
+    ///
+    /// Executes the inner steps only if the condition evaluates to true.
+    #[serde(rename_all = "camelCase")]
+    When {
+        /// The condition to evaluate
+        condition: StepWhenCondition,
+        /// Steps to execute if condition is true
+        steps: Vec<Step>,
+    },
+
+    /// Error handler wrapper
+    ///
+    /// Executes steps and if any fail, runs the on_error steps before propagating the error.
+    #[serde(rename_all = "camelCase")]
+    ErrorHandler {
+        /// Steps to execute
+        steps: Vec<Step>,
+        /// Steps to execute on error (optional)
+        #[serde(skip_serializing_if = "Option::is_none")]
+        on_error: Option<Vec<Step>>,
+    },
+
+    /// Environment check step
+    ///
+    /// Returns Success if the environment check matches, Skipped otherwise.
+    #[serde(rename_all = "camelCase")]
+    Is {
+        /// The environment check to perform
+        env_check: EnvCheck,
+    },
+
+    /// WithCredentials step
+    ///
+    /// Executes inner steps with credentials injected as environment variables.
+    #[serde(rename_all = "camelCase")]
+    WithCredentials {
+        /// The credential ID to look up from PipelineConfig
+        credential_id: String,
+        /// Steps to execute with the credentials
+        steps: Vec<Step>,
+    },
+
+    /// Checkout step
+    ///
+    /// Clones a repository using git.
+    #[serde(rename_all = "camelCase")]
+    Checkout {
+        /// SCM configuration for checkout
+        scm: crate::config::ScmConfig,
     },
 }
 
@@ -677,5 +839,522 @@ mod tests {
             message: "Hello".to_string(),
         };
         assert!(matches!(echo, StepType::Echo { .. }));
+    }
+
+    // =======================================================================
+    // StepType::Log Tests
+    // =======================================================================
+
+    #[test]
+    fn test_step_type_log_variant_exists() {
+        use crate::logging::LogLevel;
+
+        let log_step = StepType::Log {
+            level: LogLevel::Info,
+            message: "Test message".to_string(),
+        };
+        assert!(matches!(log_step, StepType::Log { .. }));
+    }
+
+    #[test]
+    fn test_step_type_log_pattern_matching() {
+        use crate::logging::LogLevel;
+
+        let log_step = StepType::Log {
+            level: LogLevel::Warn,
+            message: "Warning message".to_string(),
+        };
+
+        if let StepType::Log { level, message } = log_step {
+            assert_eq!(level, LogLevel::Warn);
+            assert_eq!(message, "Warning message");
+        } else {
+            panic!("Expected StepType::Log variant");
+        }
+    }
+
+    #[test]
+    fn test_step_type_log_serialization() {
+        use crate::logging::LogLevel;
+
+        let log_step = StepType::Log {
+            level: LogLevel::Error,
+            message: "Error occurred".to_string(),
+        };
+
+        let json = serde_json::to_string(&log_step).unwrap();
+        assert!(json.contains("\"type\":\"log\""));
+        assert!(json.contains("\"level\":\"error\""));
+        assert!(json.contains("\"message\":\"Error occurred\""));
+    }
+
+    #[test]
+    fn test_step_type_log_deserialization() {
+        use crate::logging::LogLevel;
+
+        let json = r#"{"type":"log","level":"debug","message":"Debug info"}"#;
+        let log_step: StepType = serde_json::from_str(json).unwrap();
+
+        if let StepType::Log { level, message } = log_step {
+            assert_eq!(level, LogLevel::Debug);
+            assert_eq!(message, "Debug info");
+        } else {
+            panic!("Expected StepType::Log variant");
+        }
+    }
+
+    #[test]
+    fn test_step_type_log_roundtrip() {
+        use crate::logging::LogLevel;
+
+        let original = StepType::Log {
+            level: LogLevel::Fatal,
+            message: "Critical failure".to_string(),
+        };
+
+        let json = serde_json::to_string(&original).unwrap();
+        let parsed: StepType = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed, original);
+    }
+
+    #[test]
+    fn test_step_type_log_all_levels() {
+        use crate::logging::LogLevel;
+
+        let levels = vec![
+            (LogLevel::Debug, "Debug message"),
+            (LogLevel::Info, "Info message"),
+            (LogLevel::Warn, "Warn message"),
+            (LogLevel::Error, "Error message"),
+            (LogLevel::Fatal, "Fatal message"),
+        ];
+
+        for (level, msg) in levels {
+            let log_step = StepType::Log {
+                level,
+                message: msg.to_string(),
+            };
+
+            if let StepType::Log { level: lvl, message: m } = log_step {
+                assert_eq!(lvl, level);
+                assert_eq!(m, msg);
+            } else {
+                panic!("Expected StepType::Log variant for level {:?}", level);
+            }
+        }
+    }
+
+    // =======================================================================
+    // WhenCondition Tests (SCN-AST-001 to SCN-AST-005)
+    // =======================================================================
+
+    #[test]
+    fn test_when_condition_expr_true() {
+        // SCN-AST-001: When with true condition → steps execute
+        let env = Environment::new();
+        let condition = StepWhenCondition::Expr(true);
+        assert!(condition.evaluate(&env));
+    }
+
+    #[test]
+    fn test_when_condition_expr_false() {
+        // SCN-AST-002: When with false condition → steps skipped
+        let env = Environment::new();
+        let condition = StepWhenCondition::Expr(false);
+        assert!(!condition.evaluate(&env));
+    }
+
+    #[test]
+    fn test_when_condition_not_true() {
+        // SCN-AST-003: When.not(true) → steps execute
+        let env = Environment::new();
+        let condition = StepWhenCondition::Not(Box::new(StepWhenCondition::Expr(true)));
+        assert!(!condition.evaluate(&env));
+    }
+
+    #[test]
+    fn test_when_condition_not_false() {
+        let env = Environment::new();
+        let condition = StepWhenCondition::Not(Box::new(StepWhenCondition::Expr(false)));
+        assert!(condition.evaluate(&env));
+    }
+
+    #[test]
+    fn test_when_condition_any_with_true() {
+        // SCN-AST-004: When.any([false, true]) → execute
+        let env = Environment::new();
+        let condition = StepWhenCondition::Any(vec![
+            StepWhenCondition::Expr(false),
+            StepWhenCondition::Expr(true),
+        ]);
+        assert!(condition.evaluate(&env));
+    }
+
+    #[test]
+    fn test_when_condition_any_all_false() {
+        let env = Environment::new();
+        let condition = StepWhenCondition::Any(vec![
+            StepWhenCondition::Expr(false),
+            StepWhenCondition::Expr(false),
+        ]);
+        assert!(!condition.evaluate(&env));
+    }
+
+    #[test]
+    fn test_when_condition_all_true() {
+        let env = Environment::new();
+        let condition = StepWhenCondition::All(vec![
+            StepWhenCondition::Expr(true),
+            StepWhenCondition::Expr(true),
+        ]);
+        assert!(condition.evaluate(&env));
+    }
+
+    #[test]
+    fn test_when_condition_all_with_false() {
+        // SCN-AST-005: When.all([true, false]) → skipped
+        let env = Environment::new();
+        let condition = StepWhenCondition::All(vec![
+            StepWhenCondition::Expr(true),
+            StepWhenCondition::Expr(false),
+        ]);
+        assert!(!condition.evaluate(&env));
+    }
+
+    #[test]
+    fn test_when_condition_env_equal_match() {
+        let mut env = Environment::new();
+        env.insert("BRANCH", "main");
+        let condition = StepWhenCondition::EnvEqual {
+            key: "BRANCH".to_string(),
+            value: "main".to_string(),
+        };
+        assert!(condition.evaluate(&env));
+    }
+
+    #[test]
+    fn test_when_condition_env_equal_no_match() {
+        let mut env = Environment::new();
+        env.insert("BRANCH", "develop");
+        let condition = StepWhenCondition::EnvEqual {
+            key: "BRANCH".to_string(),
+            value: "main".to_string(),
+        };
+        assert!(!condition.evaluate(&env));
+    }
+
+    #[test]
+    fn test_when_condition_env_equal_missing_key() {
+        let env = Environment::new();
+        let condition = StepWhenCondition::EnvEqual {
+            key: "MISSING".to_string(),
+            value: "value".to_string(),
+        };
+        assert!(!condition.evaluate(&env));
+    }
+
+    #[test]
+    fn test_when_condition_nested() {
+        let env = Environment::new();
+        // (true AND false) OR true = true
+        let condition = StepWhenCondition::Any(vec![
+            StepWhenCondition::All(vec![
+                StepWhenCondition::Expr(true),
+                StepWhenCondition::Expr(false),
+            ]),
+            StepWhenCondition::Expr(true),
+        ]);
+        assert!(condition.evaluate(&env));
+    }
+
+    // =======================================================================
+    // EnvCheck Tests (SCN-AST-008, SCN-AST-009)
+    // =======================================================================
+
+    #[test]
+    fn test_env_check_integration_match() {
+        // SCN-AST-008: Is.integration when ENV=integration → success
+        let mut env = Environment::new();
+        env.insert("DEPLOY_ENV", "integration");
+        let check = EnvCheck::Integration;
+        assert!(check.check(&env));
+    }
+
+    #[test]
+    fn test_env_check_integration_no_match() {
+        let mut env = Environment::new();
+        env.insert("DEPLOY_ENV", "dev");
+        let check = EnvCheck::Integration;
+        assert!(!check.check(&env));
+    }
+
+    #[test]
+    fn test_env_check_production_match() {
+        // SCN-AST-009: Is.production when ENV=production → success
+        let mut env = Environment::new();
+        env.insert("DEPLOY_ENV", "production");
+        let check = EnvCheck::Production;
+        assert!(check.check(&env));
+    }
+
+    #[test]
+    fn test_env_check_production_no_match() {
+        // SCN-AST-009: Is.production when ENV=dev → skipped
+        let mut env = Environment::new();
+        env.insert("DEPLOY_ENV", "dev");
+        let check = EnvCheck::Production;
+        assert!(!check.check(&env));
+    }
+
+    #[test]
+    fn test_env_check_certification_match() {
+        let mut env = Environment::new();
+        env.insert("DEPLOY_ENV", "certification");
+        let check = EnvCheck::Certification;
+        assert!(check.check(&env));
+    }
+
+    #[test]
+    fn test_env_check_preproduction_match() {
+        let mut env = Environment::new();
+        env.insert("DEPLOY_ENV", "preproduction");
+        let check = EnvCheck::Preproduction;
+        assert!(check.check(&env));
+    }
+
+    #[test]
+    fn test_env_check_custom_match() {
+        let mut env = Environment::new();
+        env.insert("CUSTOM_KEY", "custom_value");
+        let check = EnvCheck::Custom {
+            key: "CUSTOM_KEY".to_string(),
+            value: "custom_value".to_string(),
+        };
+        assert!(check.check(&env));
+    }
+
+    #[test]
+    fn test_env_check_custom_no_match() {
+        let mut env = Environment::new();
+        env.insert("CUSTOM_KEY", "other_value");
+        let check = EnvCheck::Custom {
+            key: "CUSTOM_KEY".to_string(),
+            value: "custom_value".to_string(),
+        };
+        assert!(!check.check(&env));
+    }
+
+    #[test]
+    fn test_env_check_missing_key_returns_false() {
+        let env = Environment::new();
+        let check = EnvCheck::Integration;
+        assert!(!check.check(&env));
+    }
+
+    // =======================================================================
+    // StepType::When Tests
+    // =======================================================================
+
+    #[test]
+    fn test_step_type_when_variant_exists() {
+        let when_step = StepType::When {
+            condition: StepWhenCondition::Expr(true),
+            steps: vec![],
+        };
+        assert!(matches!(when_step, StepType::When { .. }));
+    }
+
+    #[test]
+    fn test_step_type_when_serialization() {
+        let when_step = StepType::When {
+            condition: StepWhenCondition::Expr(true),
+            steps: vec![Step::echo("hello")],
+        };
+
+        let json = serde_json::to_string(&when_step).unwrap();
+        assert!(json.contains("\"type\":\"when\""));
+        assert!(json.contains("\"condition\":{\"expr\":true}"));
+    }
+
+    #[test]
+    fn test_step_type_when_deserialization() {
+        let json = r#"{"type":"when","condition":{"expr":true},"steps":[]}"#;
+        let when_step: StepType = serde_json::from_str(json).unwrap();
+        assert!(matches!(when_step, StepType::When { .. }));
+    }
+
+    // =======================================================================
+    // StepType::ErrorHandler Tests (SCN-AST-006, SCN-AST-007)
+    // =======================================================================
+
+    #[test]
+    fn test_step_type_error_handler_variant_exists() {
+        let eh_step = StepType::ErrorHandler {
+            steps: vec![],
+            on_error: None,
+        };
+        assert!(matches!(eh_step, StepType::ErrorHandler { .. }));
+    }
+
+    #[test]
+    fn test_step_type_error_handler_with_on_error() {
+        let eh_step = StepType::ErrorHandler {
+            steps: vec![Step::shell("echo hello")],
+            on_error: Some(vec![Step::shell("echo error")]),
+        };
+        assert!(matches!(eh_step, StepType::ErrorHandler { .. }));
+    }
+
+    #[test]
+    fn test_step_type_error_handler_serialization() {
+        let eh_step = StepType::ErrorHandler {
+            steps: vec![],
+            on_error: Some(vec![]),
+        };
+
+        let json = serde_json::to_string(&eh_step).unwrap();
+        assert!(json.contains("\"type\":\"errorHandler\""));
+        assert!(json.contains("\"steps\":[]"));
+        assert!(json.contains("\"onError\":[]"));
+    }
+
+    // =======================================================================
+    // StepType::Is Tests (SCN-AST-008, SCN-AST-009)
+    // =======================================================================
+
+    #[test]
+    fn test_step_type_is_variant_exists() {
+        let is_step = StepType::Is {
+            env_check: EnvCheck::Production,
+        };
+        assert!(matches!(is_step, StepType::Is { .. }));
+    }
+
+    #[test]
+    fn test_step_type_is_serialization() {
+        let is_step = StepType::Is {
+            env_check: EnvCheck::Production,
+        };
+
+        let json = serde_json::to_string(&is_step).unwrap();
+        eprintln!("JSON: {}", json);
+        assert!(json.contains("\"type\":\"is\""));
+        assert!(json.contains("\"envCheck\":\"production\""));
+    }
+
+    #[test]
+    fn test_step_type_is_deserialization() {
+        let json = r#"{"type":"is","envCheck":"production"}"#;
+        let is_step: StepType = serde_json::from_str(json).unwrap();
+        assert!(matches!(is_step, StepType::Is { env_check: EnvCheck::Production, .. }));
+    }
+
+    // =======================================================================
+    // StepType::WithCredentials Tests (SCN-AST-010, SCN-AST-011)
+    // =======================================================================
+
+    #[test]
+    fn test_step_type_with_credentials_variant_exists() {
+        let cred_step = StepType::WithCredentials {
+            credential_id: "github-creds".to_string(),
+            steps: vec![],
+        };
+        assert!(matches!(cred_step, StepType::WithCredentials { .. }));
+    }
+
+    #[test]
+    fn test_step_type_with_credentials_serialization() {
+        let cred_step = StepType::WithCredentials {
+            credential_id: "github-creds".to_string(),
+            steps: vec![Step::echo("test")],
+        };
+
+        let json = serde_json::to_string(&cred_step).unwrap();
+        assert!(json.contains("\"type\":\"withCredentials\""));
+        assert!(json.contains("\"credentialId\":\"github-creds\""));
+        assert!(json.contains("\"steps\""));
+    }
+
+    #[test]
+    fn test_step_type_with_credentials_deserialization() {
+        let json = r#"{"type":"withCredentials","credentialId":"gh","steps":[{"type":"echo","message":"hi"}]}"#;
+        let cred_step: StepType = serde_json::from_str(json).unwrap();
+        assert!(matches!(cred_step, StepType::WithCredentials { credential_id, .. } if credential_id == "gh"));
+    }
+
+    #[test]
+    fn test_step_type_with_credentials_empty_steps() {
+        let cred_step = StepType::WithCredentials {
+            credential_id: "creds".to_string(),
+            steps: vec![],
+        };
+
+        let json = serde_json::to_string(&cred_step).unwrap();
+        assert!(json.contains("\"steps\":[]"));
+    }
+
+    // =======================================================================
+    // StepType::Checkout Tests (SCN-AST-012, SCN-AST-013)
+    // =======================================================================
+
+    #[test]
+    fn test_step_type_checkout_variant_exists() {
+        use crate::config::ScmConfig;
+        let checkout_step = StepType::Checkout {
+            scm: ScmConfig {
+                url: "https://github.com/example/repo".to_string(),
+                branch: "main".to_string(),
+                credentials_id: None,
+                shallow_clone: true,
+                submodule_recursive: false,
+            },
+        };
+        assert!(matches!(checkout_step, StepType::Checkout { .. }));
+    }
+
+    #[test]
+    fn test_step_type_checkout_serialization() {
+        use crate::config::ScmConfig;
+        let checkout_step = StepType::Checkout {
+            scm: ScmConfig {
+                url: "https://github.com/example/repo".to_string(),
+                branch: "develop".to_string(),
+                credentials_id: Some("ssh-key".to_string()),
+                shallow_clone: true,
+                submodule_recursive: true,
+            },
+        };
+
+        let json = serde_json::to_string(&checkout_step).unwrap();
+        assert!(json.contains("\"type\":\"checkout\""));
+        assert!(json.contains("\"url\":\"https://github.com/example/repo\""));
+        assert!(json.contains("\"branch\":\"develop\""));
+        assert!(json.contains("\"shallowClone\":true"));
+    }
+
+    #[test]
+    fn test_step_type_checkout_deserialization() {
+        let json = r#"{"type":"checkout","scm":{"url":"https://github.com/test/repo","branch":"feature","shallowClone":false,"submoduleRecursive":true}}"#;
+        let checkout_step: StepType = serde_json::from_str(json).unwrap();
+        assert!(matches!(checkout_step, StepType::Checkout { scm } if scm.url == "https://github.com/test/repo" && scm.branch == "feature"));
+    }
+
+    #[test]
+    fn test_step_type_checkout_shallow_clone_serde() {
+        use crate::config::ScmConfig;
+        // Test that shallow_clone defaults to true
+        let checkout_shallow = StepType::Checkout {
+            scm: ScmConfig {
+                url: "https://github.com/example/repo".to_string(),
+                branch: "main".to_string(),
+                credentials_id: None,
+                shallow_clone: true,
+                submodule_recursive: true,
+            },
+        };
+
+        let json = serde_json::to_string(&checkout_shallow).unwrap();
+        assert!(json.contains("\"shallowClone\":true"));
     }
 }

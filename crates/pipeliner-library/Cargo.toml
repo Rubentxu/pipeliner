@@ -1,0 +1,38 @@
+[package]
+name = "pipeliner-library"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.92.0"
+description = "Library system for Pipeliner - runtime library loading from git repos, local paths, or local library dirs"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/pipeliner-org/pipeliner"
+keywords = ["pipeline", "dsl", "library", "extensibility"]
+categories = ["development-tools"]
+
+[features]
+default = []
+
+[dependencies]
+# Workspace dependencies
+pipeliner-core = { path = "../pipeliner-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "process", "macros"] }
+tracing = { workspace = true }
+
+# File discovery
+walkdir = "2"
+
+# RAII temp directory cleanup
+tempfile = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = "1.4"
+rstest = "0.22"
+tempfile = { workspace = true }
+
+[lib]
+name = "pipeliner_library"
+path = "src/lib.rs"

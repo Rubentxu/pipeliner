@@ -271,7 +271,7 @@ async fn execute_stage(
     let executor = StepExecutor::new();
 
     for step in &stage.steps {
-        match executor.execute(step, context).await {
+        match executor.execute(step, context, None).await {
             Ok(ExecutionStatus::Success) => continue,
             Ok(status) => return Ok(status),
             Err(e) => return Err(e),
@@ -295,7 +295,7 @@ async fn execute_pipeline_for_cell(
         context.set_current_stage(&stage.name);
 
         for step in &stage.steps {
-            match executor.execute(step, context).await {
+            match executor.execute(step, context, None).await {
                 Ok(ExecutionStatus::Success) => continue,
                 Ok(status) => return Ok(status),
                 Err(e) => return Err(e),

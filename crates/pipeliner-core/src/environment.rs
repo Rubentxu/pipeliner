@@ -67,6 +67,11 @@ impl Environment {
         self.0.get(key)
     }
 
+    /// Removes a value by key, returning the removed value if it existed
+    pub fn remove(&mut self, key: &str) -> Option<EnvVarValue> {
+        self.0.remove(key)
+    }
+
     /// Returns an iterator over all environment variables
     pub fn iter(&self) -> impl Iterator<Item = (&str, &EnvVarValue)> {
         self.0.iter().map(|(k, v)| (k.as_str(), v))
