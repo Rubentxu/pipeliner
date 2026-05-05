@@ -79,10 +79,12 @@ impl StepFactory for GitTool {
                 let dir = args.get(2).and_then(|v| v.as_str());
 
                 let mut git_args = vec!["clone"];
+                // git clone takes: git clone <url> [<directory>]
+                // URL must come before directory
+                git_args.push(url);
                 if let Some(directory) = dir {
                     git_args.push(directory);
                 }
-                git_args.push(url);
 
                 let result = self.run_git_command(
                     &git_args.iter().map(|s| *s).collect::<Vec<_>>()
