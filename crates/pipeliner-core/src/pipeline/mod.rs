@@ -10,6 +10,7 @@ use crate::environment::Environment;
 use crate::matrix::MatrixConfig;
 use crate::options::PipelineOptions;
 use crate::parameters::Parameters;
+use crate::structure::{PipelineStructure, StageStructure, StepStructure};
 use crate::validation::{Validate, ValidationError};
 
 /// A pipeline definition
@@ -630,6 +631,54 @@ impl Pipeline {
     pub fn with_matrix(mut self, matrix: MatrixConfig) -> Self {
         self.matrix = Some(matrix);
         self
+    }
+
+    /// Export the pipeline structure for external visualization.
+    ///
+    /// Used to emit `PipelineDecl` events before execution starts,
+    /// so consumers (dashboard, Bastion gateway) can project the graph.
+    #[must_use]
+    pub fn structure(&self) -> PipelineStructure {
+        PipelineStructure {
+            stages: self.stages.iter().map(|stage| {
+                let has_matrix = stage.options.as_ref().and_then(|o| o.retry).is_some()
+                    || self.matrix.is_some();
+                StageStructure {
+                    name: stage.name.clone(),
+                    steps: stage.steps.iter().map(|step| StepStructure {
+                        name: step.name.clone(),
+                        step_type: match &step.step_type {
+                            StepType::Shell { .. } => "shell",
+                            StepType::Echo { .. } => "echo",
+                            StepType::Retry { .. } => "retry",
+                            StepType::Timeout { .. } => "timeout",
+                            StepType::Stash { .. } => "stash",
+                            StepType::Unstash { .. } => "unstash",
+                            StepType::Input { .. } => "input",
+                            StepType::Dir { .. } => "dir",
+                            StepType::Script { .. } => "script",
+                            StepType::Archive { .. } => "archive",
+                            StepType::Custom { .. } => "custom",
+                            StepType::Log { .. } => "log",
+                            StepType::When { .. } => "when",
+                            StepType::ErrorHandler { .. } => "error_handler",
+                            StepType::Is { .. } => "is",
+                            StepType::WithCredentials { .. } => "with_credentials",
+                            StepType::Checkout { .. } => "checkout",
+                        }
+                        .to_string(),
+                        command: match &step.step_type {
+                            StepType::Shell { command } => Some(command.clone()),
+                            StepType::Script { content } => Some(content.clone()),
+                            _ => None,
+                        },
+                    }).collect(),
+                    has_parallel: false,
+                    has_matrix,
+                    when_condition: stage.when.as_ref().map(|w| format!("{:?}", w)),
+                }
+            }).collect(),
+        }
     }
 }
 

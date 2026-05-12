@@ -82,6 +82,7 @@ pub mod pipeline;
 pub mod prelude;
 pub mod registry;
 pub mod runtime;
+pub mod structure;
 pub mod validation;
 
 // Re-exports for common use
@@ -96,6 +97,7 @@ pub use pipeline::{Pipeline, Stage, Step, StepType, StepWhenCondition, EnvCheck}
 pub use context::PipelineContext;
 pub use registry::{CustomStep, StepError, StepFactory, StepRegistry};
 pub use runtime::{LifecyclePhase, PhaseResult, PipelineRuntime, PipelineRunResult, RuntimeError};
+pub use structure::{PipelineStructure, StageStructure, StepStructure};
 pub use validation::{Validate, ValidationError, ValidationResult};
 
 // Version
