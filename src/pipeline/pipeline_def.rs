@@ -7,7 +7,8 @@ use crate::pipeline::errors::ValidationError;
 use crate::pipeline::options::{PipelineOptions, Trigger};
 use crate::pipeline::post::PostCondition;
 use crate::pipeline::stage::Stage;
-use crate::pipeline::types::Validate;
+use crate::pipeline::steps::StepType;
+use crate::pipeline::types::{PipelineStructure, StageStructure, StepStructure, Validate};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -87,6 +88,37 @@ impl Pipeline {
     /// Returns number of stages
     pub fn stage_count(&self) -> usize {
         self.stages.len()
+    }
+
+    /// Export the pipeline structure for external visualization.
+    /// Used to emit `PipelineDecl` events before execution starts.
+    pub fn structure(&self) -> PipelineStructure {
+        PipelineStructure {
+            stages: self.stages.iter().map(|stage| StageStructure {
+                name: stage.name.clone(),
+                steps: stage.steps.iter().map(|step| StepStructure {
+                    name: step.name.clone(),
+                    step_type: match &step.step_type {
+                        StepType::Shell { .. } => "shell",
+                        StepType::Echo { .. } => "echo",
+                        StepType::Retry { .. } => "retry",
+                        StepType::Timeout { .. } => "timeout",
+                        StepType::Stash { .. } => "stash",
+                        StepType::Unstash { .. } => "unstash",
+                        StepType::Input { .. } => "input",
+                        StepType::Dir { .. } => "dir",
+                    }
+                    .to_string(),
+                    command: match &step.step_type {
+                        StepType::Shell { command } => Some(command.clone()),
+                        _ => None,
+                    },
+                }).collect(),
+                has_parallel: !stage.parallel.is_empty(),
+                has_matrix: stage.matrix.is_some(),
+                when_condition: stage.when.as_ref().map(|w| format!("{:?}", w)),
+            }).collect(),
+        }
     }
 }
 

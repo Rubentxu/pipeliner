@@ -7,6 +7,11 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+// Re-export structure types from pipeliner-core for backward compatibility.
+// These were originally defined here but moved to pipeliner-core so that
+// Pipeline::structure() can be implemented without circular dependencies.
+pub use pipeliner_core::structure::{PipelineStructure, StageStructure, StepStructure};
+
 /// Event metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EventMetadata {
@@ -94,6 +99,16 @@ impl EventEnvelope {
 /// Pipeline events
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum PipelineEvent {
+    /// Pipeline declaration with full structure for external visualization.
+    /// Emitted BEFORE execution starts so consumers can project the graph.
+    PipelineDecl {
+        pipeline_id: Uuid,
+        execution_id: Uuid,
+        /// Pipeline name
+        name: String,
+        /// Serialized pipeline structure (stages, steps, conditions, DAG)
+        structure: PipelineStructure,
+    },
     Created {
         pipeline_id: Uuid,
         name: String,
@@ -113,6 +128,8 @@ pub enum PipelineEvent {
         execution_id: Uuid,
         stage_name: String,
         result: String,
+        /// Duration in milliseconds. [ADDITIVE]
+        duration_ms: u64,
     },
     StepStarted {
         pipeline_id: Uuid,
@@ -126,6 +143,10 @@ pub enum PipelineEvent {
         stage_name: String,
         step_name: String,
         output: Option<String>,
+        /// Duration in milliseconds. [ADDITIVE]
+        duration_ms: u64,
+        /// Exit code of the command. [ADDITIVE]
+        exit_code: Option<i32>,
     },
     Completed {
         pipeline_id: Uuid,
@@ -147,6 +168,7 @@ pub enum PipelineEvent {
 impl PipelineEvent {
     pub fn event_type(&self) -> &str {
         match self {
+            Self::PipelineDecl { .. } => "PipelineDecl",
             Self::Created { .. } => "PipelineCreated",
             Self::Started { .. } => "PipelineStarted",
             Self::StageStarted { .. } => "StageStarted",
@@ -161,6 +183,7 @@ impl PipelineEvent {
 
     pub fn aggregate_id(&self) -> &Uuid {
         match self {
+            Self::PipelineDecl { pipeline_id, .. } => pipeline_id,
             Self::Created { pipeline_id, .. } => pipeline_id,
             Self::Started { pipeline_id, .. } => pipeline_id,
             Self::StageStarted { pipeline_id, .. } => pipeline_id,
@@ -285,6 +308,26 @@ mod tests {
 
     #[test]
     fn test_pipeline_event_type() {
+        let event = PipelineEvent::PipelineDecl {
+            pipeline_id: Uuid::new_v4(),
+            execution_id: Uuid::new_v4(),
+            name: "test".to_string(),
+            structure: PipelineStructure {
+                stages: vec![StageStructure {
+                    name: "Build".to_string(),
+                    steps: vec![StepStructure {
+                        name: Some("step1".to_string()),
+                        step_type: "shell".to_string(),
+                        command: Some("echo hello".to_string()),
+                    }],
+                    has_parallel: false,
+                    has_matrix: false,
+                    when_condition: None,
+                }],
+            },
+        };
+        assert_eq!(event.event_type(), "PipelineDecl");
+
         let event = PipelineEvent::Created {
             pipeline_id: Uuid::new_v4(),
             name: "test".to_string(),
@@ -301,11 +344,13 @@ mod tests {
 
     #[test]
     fn test_any_event_pipeline() {
-        let event = AnyEvent::Pipeline(PipelineEvent::Created {
+        let event = AnyEvent::Pipeline(PipelineEvent::PipelineDecl {
             pipeline_id: Uuid::new_v4(),
+            execution_id: Uuid::new_v4(),
             name: "test".to_string(),
+            structure: PipelineStructure { stages: vec![] },
         });
-        assert_eq!(event.event_type(), "PipelineCreated");
+        assert_eq!(event.event_type(), "PipelineDecl");
         assert!(event.aggregate_id().is_some());
     }
 

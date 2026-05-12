@@ -32,7 +32,7 @@ pub use event_store::{EventStore, InMemoryEventStore, InMemorySnapshotStore, Sna
 pub use markers::{StageMarkerEmitter, StageMarkerParser, STAGE_MARKER_PREFIX};
 pub use types::{
     AnyEvent, EventEnvelope, EventMetadata, InfrastructureEvent, PipelineEvent, WorkerEvent,
-    StageMarker, StageResult,
+    StageMarker, StageResult, PipelineStructure, StageStructure, StepStructure,
 };
 
 /// Event errors

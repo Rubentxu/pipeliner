@@ -8,6 +8,39 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
+/// Serializable pipeline structure for external consumers (dashboard, Bastion).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PipelineStructure {
+    /// List of stages in the pipeline
+    pub stages: Vec<StageStructure>,
+}
+
+/// Serializable stage structure.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StageStructure {
+    /// Stage name
+    pub name: String,
+    /// Steps in this stage
+    pub steps: Vec<StepStructure>,
+    /// Whether this stage has parallel branches
+    pub has_parallel: bool,
+    /// Whether this stage uses matrix expansion
+    pub has_matrix: bool,
+    /// Human-readable description of when condition
+    pub when_condition: Option<String>,
+}
+
+/// Serializable step structure.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StepStructure {
+    /// Optional step name
+    pub name: Option<String>,
+    /// Step type (e.g., "shell", "echo", "retry", "timeout")
+    pub step_type: String,
+    /// Command for shell steps
+    pub command: Option<String>,
+}
+
 /// Result type for pipeline execution
 pub type PipelineResult = std::result::Result<StageResult, super::errors::PipelineError>;
 

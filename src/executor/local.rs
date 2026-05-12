@@ -5,12 +5,28 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
 use std::time::Instant;
+use uuid::Uuid;
+
+// Event bus imports
+use pipeliner_events::types::{AnyEvent, EventEnvelope, EventMetadata, PipelineEvent};
+use pipeliner_events::{LocalEventBus, EventBus};
 
 /// Local executor that runs commands on host system
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct LocalExecutor {
     /// Configuration for executor
     config: ExecutorConfig,
+    /// Optional event bus for structured event emission.
+    /// When None, only tracing logs are emitted (current behavior).
+    event_bus: Option<Arc<LocalEventBus>>,
+}
+
+impl std::fmt::Debug for LocalExecutor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LocalExecutor")
+            .field("config", &self.config)
+            .finish()
+    }
 }
 
 /// Configuration for local executor
@@ -32,6 +48,7 @@ impl LocalExecutor {
     pub fn new() -> Self {
         Self {
             config: ExecutorConfig::default(),
+            event_bus: None,
         }
     }
 
@@ -55,6 +72,27 @@ impl LocalExecutor {
         self.config.shell = shell.into();
         self
     }
+
+    /// Sets the event bus for structured event emission.
+    /// Without this, the executor only uses tracing (backward compatible).
+    #[must_use]
+    pub fn with_event_bus(mut self, bus: Arc<LocalEventBus>) -> Self {
+        self.event_bus = Some(bus);
+        self
+    }
+
+    /// Helper: emit event if bus is configured (sync version using tokio runtime).
+    fn emit_sync(&self, event: PipelineEvent) {
+        if let Some(bus) = &self.event_bus {
+            let envelope = EventEnvelope::new(
+                AnyEvent::Pipeline(event),
+                EventMetadata::new("local-executor"),
+            );
+            // Use tokio runtime to publish asynchronously from sync context
+            let rt = tokio::runtime::Handle::current();
+            let _ = rt.block_on(bus.publish(envelope));
+        }
+    }
 }
 
 impl Default for LocalExecutor {
@@ -65,15 +103,64 @@ impl Default for LocalExecutor {
 
 impl PipelineExecutor for LocalExecutor {
     fn execute(&self, pipeline: &Pipeline) -> Result<StageResult, crate::pipeline::PipelineError> {
-        let pipeline_id = pipeline
+        let pipeline_id = Uuid::new_v4();
+        let execution_id = Uuid::new_v4();
+        let pipeline_name = pipeline
             .name
             .clone()
             .unwrap_or_else(|| "unnamed".to_string());
+
         tracing::info!(
             pipeline_id = %pipeline_id,
+            execution_id = %execution_id,
             stages_count = pipeline.stages.len(),
             "Starting pipeline execution"
         );
+
+        // Emit PipelineDecl event with full structure
+        // Convert from pipeline::types::PipelineStructure to pipeliner_events::PipelineStructure
+        let structure = pipeliner_events::PipelineStructure {
+            stages: pipeline.stages.iter().map(|stage| {
+                pipeliner_events::StageStructure {
+                    name: stage.name.clone(),
+                    steps: stage.steps.iter().map(|step| {
+                        pipeliner_events::StepStructure {
+                            name: step.name.clone(),
+                            step_type: match &step.step_type {
+                                StepType::Shell { .. } => "shell",
+                                StepType::Echo { .. } => "echo",
+                                StepType::Retry { .. } => "retry",
+                                StepType::Timeout { .. } => "timeout",
+                                StepType::Stash { .. } => "stash",
+                                StepType::Unstash { .. } => "unstash",
+                                StepType::Input { .. } => "input",
+                                StepType::Dir { .. } => "dir",
+                            }.to_string(),
+                            command: match &step.step_type {
+                                StepType::Shell { command } => Some(command.clone()),
+                                _ => None,
+                            },
+                        }
+                    }).collect(),
+                    has_parallel: !stage.parallel.is_empty(),
+                    has_matrix: stage.matrix.is_some(),
+                    when_condition: stage.when.as_ref().map(|w| format!("{:?}", w)),
+                }
+            }).collect(),
+        };
+        self.emit_sync(PipelineEvent::PipelineDecl {
+            pipeline_id,
+            execution_id,
+            name: pipeline_name.clone(),
+            structure,
+        });
+
+        // Emit Started event
+        self.emit_sync(PipelineEvent::Started {
+            pipeline_id,
+            execution_id,
+            stage: "all".to_string(),
+        });
 
         let mut context = PipelineContext::new();
 
@@ -87,10 +174,17 @@ impl PipelineExecutor for LocalExecutor {
             let stage_name = stage.name.clone();
             tracing::info!(stage = %stage_name, "Executing stage");
 
+            // Emit StageStarted
+            self.emit_sync(PipelineEvent::StageStarted {
+                pipeline_id,
+                execution_id,
+                stage_name: stage_name.clone(),
+            });
+
             let start = Instant::now();
 
-            // Execute stage
-            let result = self.execute_stage(stage, &context)?;
+            // Execute stage (including step execution with events)
+            let result = self.execute_stage_with_events(stage, &context, pipeline_id, execution_id)?;
 
             let duration = start.elapsed();
             tracing::info!(
@@ -100,12 +194,32 @@ impl PipelineExecutor for LocalExecutor {
                 "Stage completed"
             );
 
+            // Emit StageCompleted with duration
+            self.emit_sync(PipelineEvent::StageCompleted {
+                pipeline_id,
+                execution_id,
+                stage_name: stage_name.clone(),
+                result: match result {
+                    StageResult::Success => "SUCCESS".to_string(),
+                    StageResult::Failure => "FAILURE".to_string(),
+                    StageResult::Unstable => "UNSTABLE".to_string(),
+                    StageResult::Skipped => "SKIPPED".to_string(),
+                },
+                duration_ms: duration.as_millis() as u64,
+            });
+
             // Record result
             context.record_stage_result(&stage_name, result);
 
             // If stage failed and no retry, stop pipeline
             if result.is_failure() && pipeline.options.retry.is_none() {
                 tracing::error!(stage = %stage_name, "Stage failed, stopping pipeline");
+                // Emit Failed event
+                self.emit_sync(PipelineEvent::Failed {
+                    pipeline_id,
+                    execution_id,
+                    error: format!("Stage '{}' failed", stage_name),
+                });
                 return Ok(result);
             }
         }
@@ -118,6 +232,13 @@ impl PipelineExecutor for LocalExecutor {
                 self.execute_steps(post.steps(), &context)?;
             }
         }
+
+        // Emit Completed event
+        self.emit_sync(PipelineEvent::Completed {
+            pipeline_id,
+            execution_id,
+            result: "SUCCESS".to_string(),
+        });
 
         Ok(StageResult::Success)
     }
@@ -250,6 +371,194 @@ impl LocalExecutor {
         }
 
         Ok(result)
+    }
+
+    /// Executes a single stage with event emission
+    fn execute_stage_with_events(
+        &self,
+        stage: &Stage,
+        context: &PipelineContext,
+        pipeline_id: Uuid,
+        execution_id: Uuid,
+    ) -> Result<StageResult, crate::pipeline::PipelineError> {
+        let stage_name = stage.name.clone();
+
+        // Handle matrix configuration - generate parallel branches
+        if let Some(ref matrix) = stage.matrix {
+            let combinations = matrix.generate_combinations();
+            let mut branches = Vec::new();
+
+            for combo in &combinations {
+                let branch_name = combo
+                    .iter()
+                    .map(|(k, v)| format!("{}_{}", k, v))
+                    .collect::<Vec<_>>()
+                    .join("-");
+
+                let mut branch_steps = stage.steps.clone();
+
+                for (key, value) in combo {
+                    branch_steps.insert(0, Step::shell(&format!("export {}={}", key, value)));
+                }
+
+                branches.push(crate::pipeline::ParallelBranch {
+                    name: branch_name.clone(),
+                    stage: Stage::new(branch_name, branch_steps),
+                });
+            }
+
+            return self.execute_parallel_branches(&branches, context);
+        }
+
+        // Execute parallel branches if present (no events for parallel branches in v1)
+        if !stage.parallel.is_empty() {
+            self.execute_parallel_branches(&stage.parallel, context)?;
+        }
+
+        // Execute steps (only if no parallel branches, or after parallel)
+        if !stage.parallel.is_empty() || !stage.steps.is_empty() {
+            let result = self.execute_steps_with_events(&stage.steps, context, pipeline_id, execution_id, &stage_name)?;
+
+            // Execute post-conditions (no events for post-conditions in v1)
+            for post in &stage.post {
+                if post.should_execute(result, None) {
+                    self.execute_steps(post.steps(), context)?;
+                }
+            }
+
+            return Ok(result);
+        }
+
+        // Execute post-conditions for parallel-only stage
+        let result = StageResult::Success;
+        for post in &stage.post {
+            if post.should_execute(result, None) {
+                self.execute_steps(post.steps(), context)?;
+            }
+        }
+
+        Ok(result)
+    }
+
+    /// Executes a list of steps with event emission
+    fn execute_steps_with_events(
+        &self,
+        steps: &[Step],
+        context: &PipelineContext,
+        pipeline_id: Uuid,
+        execution_id: Uuid,
+        stage_name: &str,
+    ) -> Result<StageResult, crate::pipeline::PipelineError> {
+        for step in steps {
+            self.execute_step_with_events(step, context, pipeline_id, execution_id, stage_name)?;
+        }
+        Ok(StageResult::Success)
+    }
+
+    /// Executes a single step with event emission
+    fn execute_step_with_events(
+        &self,
+        step: &Step,
+        context: &PipelineContext,
+        pipeline_id: Uuid,
+        execution_id: Uuid,
+        stage_name: &str,
+    ) -> Result<(), crate::pipeline::PipelineError> {
+        let step_name = step.name.clone().unwrap_or_else(|| "<unnamed>".to_string());
+
+        // Emit StepStarted
+        self.emit_sync(PipelineEvent::StepStarted {
+            pipeline_id,
+            execution_id,
+            stage_name: stage_name.to_string(),
+            step_name: step_name.clone(),
+        });
+
+        let start = Instant::now();
+        let result = self.execute_step_inner(step, context);
+        let duration = start.elapsed();
+
+        match result {
+            Ok(()) => {
+                // Emit StepCompleted with duration
+                self.emit_sync(PipelineEvent::StepCompleted {
+                    pipeline_id,
+                    execution_id,
+                    stage_name: stage_name.to_string(),
+                    step_name,
+                    output: None,
+                    duration_ms: duration.as_millis() as u64,
+                    exit_code: Some(0), // success
+                });
+            }
+            Err(e) => {
+                // Emit StepCompleted with error info
+                let exit_code = if let crate::pipeline::PipelineError::CommandFailed { code, .. } = &e {
+                    Some(*code)
+                } else {
+                    None
+                };
+                self.emit_sync(PipelineEvent::StepCompleted {
+                    pipeline_id,
+                    execution_id,
+                    stage_name: stage_name.to_string(),
+                    step_name,
+                    output: Some(e.to_string()),
+                    duration_ms: duration.as_millis() as u64,
+                    exit_code,
+                });
+                return Err(e);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Inner execute_step that does the actual work (used by both regular and event-aware execution)
+    fn execute_step_inner(
+        &self,
+        step: &Step,
+        context: &PipelineContext,
+    ) -> Result<(), crate::pipeline::PipelineError> {
+        match &step.step_type {
+            StepType::Shell { command } => {
+                self.execute_shell(command, context)?;
+            }
+            StepType::Echo { message } => {
+                println!("{message}");
+            }
+            StepType::Retry { count, step } => {
+                let mut last_error = None;
+                let mut succeeded = false;
+                for attempt in 0..*count {
+                    match self.execute_step_inner(step.as_ref(), context) {
+                        Ok(()) => {
+                            succeeded = true;
+                            break;
+                        }
+                        Err(e) => {
+                            last_error = Some(e);
+                            tracing::warn!(
+                                attempt = attempt + 1,
+                                total = count,
+                                "Step failed, retrying"
+                            );
+                            std::thread::sleep(std::time::Duration::from_millis(100));
+                        }
+                    }
+                }
+                if !succeeded {
+                    return Err(last_error.unwrap());
+                }
+            }
+            StepType::Timeout { duration, step } => {
+                self.execute_timeout(*duration, step.as_ref(), context)?;
+            }
+            _ => {
+                tracing::warn!(step_type = %step.step_type, "Step type not yet implemented");
+            }
+        }
+        Ok(())
     }
 
     /// Executes parallel branches concurrently
@@ -415,45 +724,7 @@ impl LocalExecutor {
         step: &Step,
         context: &PipelineContext,
     ) -> Result<(), crate::pipeline::PipelineError> {
-        match &step.step_type {
-            StepType::Shell { command } => {
-                self.execute_shell(command, context)?;
-            }
-            StepType::Echo { message } => {
-                println!("{message}");
-            }
-            StepType::Retry { count, step } => {
-                let mut last_error = None;
-                let mut succeeded = false;
-                for attempt in 0..*count {
-                    match self.execute_step(step.as_ref(), context) {
-                        Ok(()) => {
-                            succeeded = true;
-                            break;
-                        }
-                        Err(e) => {
-                            last_error = Some(e);
-                            tracing::warn!(
-                                attempt = attempt + 1,
-                                total = count,
-                                "Step failed, retrying"
-                            );
-                            std::thread::sleep(std::time::Duration::from_millis(100));
-                        }
-                    }
-                }
-                if !succeeded {
-                    return Err(last_error.unwrap());
-                }
-            }
-            StepType::Timeout { duration, step } => {
-                self.execute_timeout(*duration, step.as_ref(), context)?;
-            }
-            _ => {
-                tracing::warn!(step_type = %step.step_type, "Step type not yet implemented");
-            }
-        }
-        Ok(())
+        self.execute_step_inner(step, context)
     }
 
     /// Executes a shell command

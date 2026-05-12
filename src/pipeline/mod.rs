@@ -25,7 +25,7 @@ pub use post::PostCondition;
 pub use shared_library::{LibraryStep, SharedLibrary, SharedLibraryError};
 pub use stage::{Stage, StageBuilder, WhenCondition};
 pub use steps::{Step, StepType};
-pub use types::{PipelineResult, StageResult, Validate};
+pub use types::{PipelineResult, PipelineStructure, StageResult, StageStructure, StepStructure, Validate};
 
 /// Defines environment variables that can be used in pipeline steps.
 ///
