@@ -29,16 +29,26 @@
 #![warn(clippy::pedantic)]
 
 pub mod context;
+pub mod formatters;
 pub mod listener;
 pub mod local;
+pub mod observers;
+pub mod report;
 pub mod runtime;
+pub mod shell;
 pub mod strategy;
+pub mod temp_files;
 
 pub use context::{ExecutionConfig, ExecutionContext};
+pub use formatters::{create_formatter, OutputFormat, OutputFormatter};
 pub use listener::ExecutionListener;
 pub use local::{LocalExecutor, LocalResult};
+pub use observers::{JsonCollector, LoggingObserver, NoopObserver, ObserverBox, PipelineContext, PipelineEvent, PipelineObserver};
+pub use report::{ExecutionReport, StageReport, StepReport};
 pub use runtime::StepExecutor;
+pub use shell::{expand_variables, jenkins_shell_config, ShellCommand, ShellConfig, ShellResult};
 pub use strategy::{ExecutionStrategy, ParallelStrategy, SequentialStrategy};
+pub use temp_files::{JenkinsPathResolver, TempFileManager};
 
 /// Re-exports
 pub use pipeliner_core::{Pipeline, Stage, Step, StepType, Validate, ValidationError};
@@ -141,6 +151,74 @@ pub struct ExecutionResult {
     pub error: Option<String>,
 }
 
+/// Capabilities of an executor
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExecutorCapabilities {
+    /// Can execute shell commands
+    pub can_execute_shell: bool,
+    /// Can run in Docker containers
+    pub can_run_docker: bool,
+    /// Can run in Kubernetes pods
+    pub can_run_kubernetes: bool,
+    /// Supports parallel execution
+    pub supports_parallel: bool,
+    /// Supports caching
+    pub supports_caching: bool,
+    /// Supports timeout
+    pub supports_timeout: bool,
+    /// Supports retry
+    pub supports_retry: bool,
+}
+
+impl Default for ExecutorCapabilities {
+    fn default() -> Self {
+        Self {
+            can_execute_shell: true,
+            can_run_docker: false,
+            can_run_kubernetes: false,
+            supports_parallel: false,
+            supports_caching: true,
+            supports_timeout: true,
+            supports_retry: true,
+        }
+    }
+}
+
+/// Health status of an executor
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HealthStatus {
+    /// Executor is healthy
+    Healthy,
+    /// Executor is degraded (some features unavailable)
+    Degraded { reason: String },
+    /// Executor is unhealthy
+    Unhealthy { reason: String },
+}
+
+impl HealthStatus {
+    /// Returns true if executor is healthy or degraded
+    #[must_use]
+    pub fn is_operational(&self) -> bool {
+        !matches!(self, Self::Unhealthy { .. })
+    }
+}
+
+/// Unified executor trait combining async execution with validation and capabilities
+#[async_trait::async_trait(?Send)]
+pub trait UnifiedExecutor {
+    /// Execute a pipeline and return the result
+    async fn execute_pipeline(&self, pipeline: &Pipeline) -> ExecutorResult<ExecutionResult>;
+
+    /// Validate a pipeline without executing
+    fn validate_pipeline(&self, pipeline: &Pipeline) -> Result<(), ValidationError>;
+
+    /// Dry run - validate and report what would execute
+    async fn dry_run(&self, pipeline: &Pipeline) -> ExecutorResult<ExecutionResult>;
+
+    /// Return executor capabilities
+    fn capabilities(&self) -> ExecutorCapabilities;
+}
+
 impl Default for ExecutionResult {
     fn default() -> Self {
         Self {
@@ -217,7 +295,72 @@ impl Executor {
 
     /// Runs the pipeline execution
     pub async fn run(&mut self) -> ExecutorResult<ExecutionResult> {
-        todo!()
+        use std::time::Instant;
+
+        // Validate the pipeline first
+        self.pipeline.validate().map_err(|e| {
+            ExecutorError::from(ExecutorErrorKind::UnexpectedTermination {
+                reason: format!("Pipeline validation failed: {}", e),
+            })
+        })?;
+
+        let start = Instant::now();
+
+        // Create a LocalExecutor
+        let mut local = LocalExecutor::new();
+
+        // Apply retry config if retry_on_failure is enabled
+        if self.config.retry_on_failure {
+            local = local.with_retry(self.config.max_retries);
+        }
+
+        // Execute with optional timeout
+        let execute_future = local.execute(&self.pipeline);
+
+        let results = if let Some(timeout) = self.config.global_timeout {
+            match tokio::time::timeout(timeout, execute_future).await {
+                Ok(results) => results,
+                Err(_) => {
+                    return Ok(ExecutionResult::failure(
+                        self.pipeline.stages.len(),
+                        0,
+                        chrono::Duration::from_std(start.elapsed()).unwrap_or_default(),
+                        "Pipeline execution timed out",
+                    ));
+                }
+            }
+        } else {
+            execute_future.await
+        };
+
+        // Convert Vec<LocalResult> to ExecutionResult
+        let duration = chrono::Duration::from_std(start.elapsed()).unwrap_or_default();
+        let stages_executed = self.pipeline.stages.len();
+        let steps_executed = results.len();
+
+        // Check if any step failed
+        let has_failure = results.iter().any(|r| !r.success);
+
+        if has_failure {
+            let error_msg = results
+                .iter()
+                .find(|r| !r.success)
+                .map(|r| r.output.clone())
+                .unwrap_or_else(|| "Unknown error".to_string());
+
+            Ok(ExecutionResult::failure(
+                stages_executed,
+                steps_executed,
+                duration,
+                error_msg,
+            ))
+        } else {
+            Ok(ExecutionResult::success(
+                stages_executed,
+                steps_executed,
+                duration,
+            ))
+        }
     }
 
     /// Validates the pipeline before execution
@@ -282,5 +425,347 @@ mod tests {
     fn test_execution_status() {
         assert_eq!(ExecutionStatus::Pending, ExecutionStatus::Pending);
         assert_ne!(ExecutionStatus::Pending, ExecutionStatus::Running);
+    }
+
+    // =======================================================================
+    // Task T3.10: ExecutorCapabilities and HealthStatus Tests
+    // =======================================================================
+
+    #[test]
+    fn test_executor_capabilities_default() {
+        let caps = ExecutorCapabilities::default();
+        assert!(caps.can_execute_shell);
+        assert!(!caps.can_run_docker);
+        assert!(!caps.can_run_kubernetes);
+        assert!(!caps.supports_parallel);
+        assert!(caps.supports_caching);
+        assert!(caps.supports_timeout);
+        assert!(caps.supports_retry);
+    }
+
+    #[test]
+    fn test_executor_capabilities_equality() {
+        let caps1 = ExecutorCapabilities::default();
+        let caps2 = ExecutorCapabilities::default();
+        assert_eq!(caps1, caps2);
+
+        let caps3 = ExecutorCapabilities {
+            can_execute_shell: false,
+            ..Default::default()
+        };
+        assert_ne!(caps1, caps3);
+    }
+
+    #[test]
+    fn test_health_status_healthy() {
+        let status = HealthStatus::Healthy;
+        assert!(status.is_operational());
+        assert_eq!(status, HealthStatus::Healthy);
+    }
+
+    #[test]
+    fn test_health_status_degraded() {
+        let status = HealthStatus::Degraded {
+            reason: "high load".to_string(),
+        };
+        assert!(status.is_operational());
+        assert!(matches!(status, HealthStatus::Degraded { .. }));
+    }
+
+    #[test]
+    fn test_health_status_unhealthy() {
+        let status = HealthStatus::Unhealthy {
+            reason: "connection lost".to_string(),
+        };
+        assert!(!status.is_operational());
+        assert!(matches!(status, HealthStatus::Unhealthy { .. }));
+    }
+
+    #[test]
+    fn test_health_status_is_operational() {
+        assert!(HealthStatus::Healthy.is_operational());
+        assert!(HealthStatus::Degraded {
+            reason: "test".to_string()
+        }
+        .is_operational());
+        assert!(!HealthStatus::Unhealthy {
+            reason: "test".to_string()
+        }
+        .is_operational());
+    }
+
+    // =======================================================================
+    // Task T3.11: Re-export Tests
+    // =======================================================================
+
+    #[test]
+    fn test_unified_executor_trait_is_exportable() {
+        // Verify the trait itself is accessible and can be used as a bound
+        fn _check_executor<E: UnifiedExecutor>(_: &E) {}
+        // If this compiles, the trait is properly exported
+    }
+
+    #[test]
+    fn test_executor_capabilities_from_crate_root() {
+        // Verify we can construct ExecutorCapabilities from the re-export
+        let caps = ExecutorCapabilities {
+            can_execute_shell: true,
+            can_run_docker: true,
+            can_run_kubernetes: false,
+            supports_parallel: true,
+            supports_caching: false,
+            supports_timeout: true,
+            supports_retry: false,
+        };
+        assert!(caps.can_execute_shell);
+        assert!(caps.can_run_docker);
+        assert!(!caps.can_run_kubernetes);
+        assert!(caps.supports_parallel);
+        assert!(!caps.supports_caching);
+        assert!(caps.supports_timeout);
+        assert!(!caps.supports_retry);
+    }
+
+    #[test]
+    fn test_health_status_from_crate_root() {
+        // Verify we can construct HealthStatus from the re-export
+        let healthy = HealthStatus::Healthy;
+        let degraded = HealthStatus::Degraded {
+            reason: "test".to_string(),
+        };
+        let unhealthy = HealthStatus::Unhealthy {
+            reason: "test".to_string(),
+        };
+        assert_eq!(healthy, HealthStatus::Healthy);
+        assert!(degraded.is_operational());
+        assert!(!unhealthy.is_operational());
+    }
+
+    // =======================================================================
+    // Task T3.5: Executor::run() Tests
+    // =======================================================================
+
+    #[tokio::test]
+    async fn test_executor_run_basic_success() {
+        let pipeline = Pipeline::new()
+            .with_name("test-pipeline")
+            .with_stage(Stage {
+                name: "build".to_string(),
+                agent: None,
+                environment: Default::default(),
+                options: None,
+                when: None,
+                post: None,
+                steps: vec![Step {
+                    step_type: StepType::Echo {
+                        message: "Hello".to_string(),
+                    },
+                    name: Some("echo-step".to_string()),
+                    timeout: None,
+                    retry: None,
+                }],
+            });
+
+        let config = ExecutionConfig::default();
+        let mut executor = Executor::new(pipeline, config);
+        let result = executor.run().await.unwrap();
+
+        assert!(result.is_success());
+        assert!(result.error.is_none());
+        assert_eq!(result.stages_executed, 1);
+        assert_eq!(result.steps_executed, 1);
+    }
+
+    #[tokio::test]
+    async fn test_executor_run_with_failure() {
+        let pipeline = Pipeline::new()
+            .with_name("test-pipeline")
+            .with_stage(Stage {
+                name: "build".to_string(),
+                agent: None,
+                environment: Default::default(),
+                options: None,
+                when: None,
+                post: None,
+                steps: vec![Step {
+                    step_type: StepType::Shell {
+                        command: "exit 1".to_string(),
+                    },
+                    name: Some("failing-step".to_string()),
+                    timeout: None,
+                    retry: None,
+                }],
+            });
+
+        let config = ExecutionConfig::default();
+        let mut executor = Executor::new(pipeline, config);
+        let result = executor.run().await.unwrap();
+
+        assert!(!result.is_success());
+        assert!(result.error.is_some());
+        assert_eq!(result.stages_executed, 1);
+        assert_eq!(result.steps_executed, 1);
+    }
+
+    #[tokio::test]
+    async fn test_executor_run_with_retry_on_failure() {
+        let pipeline = Pipeline::new()
+            .with_name("test-pipeline")
+            .with_stage(Stage {
+                name: "build".to_string(),
+                agent: None,
+                environment: Default::default(),
+                options: None,
+                when: None,
+                post: None,
+                steps: vec![Step {
+                    step_type: StepType::Echo {
+                        message: "Hello".to_string(),
+                    },
+                    name: Some("echo-step".to_string()),
+                    timeout: None,
+                    retry: None,
+                }],
+            });
+
+        let config = ExecutionConfig {
+            retry_on_failure: true,
+            max_retries: 3,
+            ..Default::default()
+        };
+        let mut executor = Executor::new(pipeline, config);
+        let result = executor.run().await.unwrap();
+
+        assert!(result.is_success());
+        assert_eq!(result.stages_executed, 1);
+    }
+
+    #[tokio::test]
+    async fn test_executor_run_with_timeout() {
+        // Note: Due to std::process::Command being blocking, the timeout may not
+        // interrupt a long-running shell command. This test verifies the timeout
+        // is set up correctly but may not fail as expected in all cases.
+        let pipeline = Pipeline::new()
+            .with_name("test-pipeline")
+            .with_stage(Stage {
+                name: "build".to_string(),
+                agent: None,
+                environment: Default::default(),
+                options: None,
+                when: None,
+                post: None,
+                steps: vec![Step {
+                    step_type: StepType::Echo {
+                        message: "Fast step".to_string(),
+                    },
+                    name: Some("fast-step".to_string()),
+                    timeout: None,
+                    retry: None,
+                }],
+            });
+
+        let config = ExecutionConfig {
+            global_timeout: Some(std::time::Duration::from_secs(30)),
+            ..Default::default()
+        };
+        let mut executor = Executor::new(pipeline, config);
+        let result = executor.run().await.unwrap();
+
+        // With a reasonable timeout, the fast step should succeed
+        assert!(result.is_success());
+        assert!(result.error.is_none());
+        assert_eq!(result.stages_executed, 1);
+    }
+
+    #[tokio::test]
+    async fn test_executor_run_with_multiple_stages() {
+        let stage1 = Stage {
+            name: "build".to_string(),
+            agent: None,
+            environment: Default::default(),
+            options: None,
+            when: None,
+            post: None,
+            steps: vec![Step {
+                step_type: StepType::Echo {
+                    message: "Building".to_string(),
+                },
+                name: Some("build-step".to_string()),
+                timeout: None,
+                retry: None,
+            }],
+        };
+
+        let stage2 = Stage {
+            name: "test".to_string(),
+            agent: None,
+            environment: Default::default(),
+            options: None,
+            when: None,
+            post: None,
+            steps: vec![Step {
+                step_type: StepType::Echo {
+                    message: "Testing".to_string(),
+                },
+                name: Some("test-step".to_string()),
+                timeout: None,
+                retry: None,
+            }],
+        };
+
+        let pipeline = Pipeline::new()
+            .with_name("test-pipeline")
+            .with_stage(stage1)
+            .with_stage(stage2);
+
+        let config = ExecutionConfig::default();
+        let mut executor = Executor::new(pipeline, config);
+        let result = executor.run().await.unwrap();
+
+        assert!(result.is_success());
+        assert_eq!(result.stages_executed, 2);
+        assert_eq!(result.steps_executed, 2);
+    }
+
+    #[tokio::test]
+    async fn test_executor_run_validates_pipeline() {
+        // An invalid pipeline (no stages) should fail validation
+        let pipeline = Pipeline::new().with_name("empty-pipeline");
+
+        let config = ExecutionConfig::default();
+        let mut executor = Executor::new(pipeline, config);
+        let result = executor.run().await;
+
+        // Should return an error because validation should fail
+        assert!(result.is_err() || result.unwrap().error.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_executor_run_with_shell_command() {
+        let pipeline = Pipeline::new()
+            .with_name("test-pipeline")
+            .with_stage(Stage {
+                name: "build".to_string(),
+                agent: None,
+                environment: Default::default(),
+                options: None,
+                when: None,
+                post: None,
+                steps: vec![Step {
+                    step_type: StepType::Shell {
+                        command: "echo 'Hello World'".to_string(),
+                    },
+                    name: Some("shell-step".to_string()),
+                    timeout: None,
+                    retry: None,
+                }],
+            });
+
+        let config = ExecutionConfig::default();
+        let mut executor = Executor::new(pipeline, config);
+        let result = executor.run().await.unwrap();
+
+        assert!(result.is_success());
+        assert!(result.error.is_none());
     }
 }

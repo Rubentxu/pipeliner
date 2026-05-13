@@ -35,6 +35,8 @@ pub struct ExecutionConfig {
     pub quiet: bool,
     /// Write results to file
     pub output_file: Option<PathBuf>,
+    /// Cache mode
+    pub cache_mode: CacheMode,
 }
 
 impl Default for ExecutionConfig {
@@ -50,6 +52,7 @@ impl Default for ExecutionConfig {
             colors: std::io::IsTerminal::is_terminal(&std::io::stdout()),
             quiet: false,
             output_file: None,
+            cache_mode: CacheMode::Full,
         }
     }
 }
@@ -244,6 +247,18 @@ pub struct StepResult {
     pub output: Option<String>,
 }
 
+/// Cache mode for execution
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CacheMode {
+    /// Full caching - cache everything
+    Full,
+    /// Only cache dependencies
+    Deps,
+    /// No caching
+    #[default]
+    None,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -295,5 +310,24 @@ mod tests {
         assert!(config.cleanup);
         assert!(!config.quiet);
         assert_eq!(config.max_retries, 0);
+    }
+
+    #[test]
+    fn test_cache_mode_default() {
+        let config = ExecutionConfig::default();
+        assert_eq!(config.cache_mode, CacheMode::Full);
+    }
+
+    #[test]
+    fn test_cache_mode_variants() {
+        assert_eq!(CacheMode::Full, CacheMode::Full);
+        assert_eq!(CacheMode::Deps, CacheMode::Deps);
+        assert_eq!(CacheMode::None, CacheMode::None);
+        assert_ne!(CacheMode::Full, CacheMode::None);
+    }
+
+    #[test]
+    fn test_cache_mode_default_trait() {
+        assert_eq!(CacheMode::default(), CacheMode::None);
     }
 }

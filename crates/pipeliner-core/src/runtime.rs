@@ -450,18 +450,23 @@ mod tests {
 
     #[test]
     fn test_pipeline_runtime_with_config() {
-        let yaml = r#"
-version: "1"
-spec:
-  pipeline:
-    name: ConfigTest
-    stages:
-      - name: Build
-        steps:
-          - type: echo
-            message: Hello
-"#;
-        let config = PipelineConfig::from_yaml(yaml).expect("Should parse YAML");
+        let json = r#"{
+            "version": "1",
+            "spec": {
+                "pipeline": {
+                    "name": "ConfigTest",
+                    "stages": [
+                        {
+                            "name": "Build",
+                            "steps": [
+                                {"type": "echo", "message": "Hello"}
+                            ]
+                        }
+                    ]
+                }
+            }
+        }"#;
+        let config = PipelineConfig::from_json(json).expect("Should parse JSON");
         let runtime = PipelineRuntime::with_config(config);
         assert!(runtime.config.is_some());
     }
@@ -489,22 +494,30 @@ spec:
 
     #[test]
     fn test_pipeline_runtime_run_with_config_libraries() {
-        let yaml = r#"
-version: "1"
-spec:
-  libraries:
-    - name: mylib
-      sourcePath: https://github.com/example/mylib
-      retrieverType: gitSource
-  pipeline:
-    name: LibraryTest
-    stages:
-      - name: Build
-        steps:
-          - type: echo
-            message: Hello
-"#;
-        let config = PipelineConfig::from_yaml(yaml).expect("Should parse YAML");
+        let json = r#"{
+            "version": "1",
+            "spec": {
+                "libraries": [
+                    {
+                        "name": "mylib",
+                        "sourcePath": "https://github.com/example/mylib",
+                        "retrieverType": "gitSource"
+                    }
+                ],
+                "pipeline": {
+                    "name": "LibraryTest",
+                    "stages": [
+                        {
+                            "name": "Build",
+                            "steps": [
+                                {"type": "echo", "message": "Hello"}
+                            ]
+                        }
+                    ]
+                }
+            }
+        }"#;
+        let config = PipelineConfig::from_json(json).expect("Should parse JSON");
         let mut runtime = PipelineRuntime::with_config(config);
 
         // Set a library loader function
@@ -523,18 +536,23 @@ spec:
 
     #[test]
     fn test_pipeline_runtime_run_with_config_no_libraries() {
-        let yaml = r#"
-version: "1"
-spec:
-  pipeline:
-    name: NoLibrariesTest
-    stages:
-      - name: Build
-        steps:
-          - type: echo
-            message: Hello
-"#;
-        let config = PipelineConfig::from_yaml(yaml).expect("Should parse YAML");
+        let json = r#"{
+            "version": "1",
+            "spec": {
+                "pipeline": {
+                    "name": "NoLibrariesTest",
+                    "stages": [
+                        {
+                            "name": "Build",
+                            "steps": [
+                                {"type": "echo", "message": "Hello"}
+                            ]
+                        }
+                    ]
+                }
+            }
+        }"#;
+        let config = PipelineConfig::from_json(json).expect("Should parse JSON");
         let mut runtime = PipelineRuntime::with_config(config);
         let pipeline = create_test_pipeline();
 

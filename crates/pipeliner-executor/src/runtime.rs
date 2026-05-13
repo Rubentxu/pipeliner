@@ -817,49 +817,63 @@ mod tests {
     #[tokio::test]
     async fn test_custom_step_integration_with_pipeline_config() {
         // E2.1: Integration test that:
-        // 1. Loads a PipelineConfig from YAML string (with libraries, environment, SCM)
+        // 1. Loads a PipelineConfig from JSON string (with libraries, environment, SCM)
         // 2. Creates a PipelineContext with a registered StepFactory
         // 3. Creates a StepType::Custom with the factory's name
         // 4. Executes the custom step through the executor
         // 5. Verifies the step executed correctly
 
-        // Step 1: Load PipelineConfig from YAML with full structure
-        let yaml = r#"
-version: "1"
-spec:
-  libraries:
-    - name: mylib
-      sourcePath: https://github.com/example/mylib
-      retrieverType: gitSource
-      defaultVersion: main
-      modules:
-        - name: core
-          path: src/core
-  environment:
-    FOO: bar
-    BAZ: qux
-  scm:
-    url: https://github.com/example/repo
-    branch: main
-    credentialsId: github-creds
-    shallowClone: true
-    submoduleRecursive: false
-  credentials:
-    - id: github-creds
-      credentialType: usernamePassword
-      fields:
-        username: user
-        password: pass
-  pipeline:
-    name: TestPipeline
-    stages:
-      - name: Build
-        steps:
-          - type: echo
-            message: Hello
-"#;
+        // Step 1: Load PipelineConfig from JSON with full structure
+        let json = r#"{
+            "version": "1",
+            "spec": {
+                "libraries": [
+                    {
+                        "name": "mylib",
+                        "sourcePath": "https://github.com/example/mylib",
+                        "retrieverType": "gitSource",
+                        "defaultVersion": "main",
+                        "modules": [
+                            {"name": "core", "path": "src/core"}
+                        ]
+                    }
+                ],
+                "environment": {
+                    "FOO": "bar",
+                    "BAZ": "qux"
+                },
+                "scm": {
+                    "url": "https://github.com/example/repo",
+                    "branch": "main",
+                    "credentialsId": "github-creds",
+                    "shallowClone": true,
+                    "submoduleRecursive": false
+                },
+                "credentials": [
+                    {
+                        "id": "github-creds",
+                        "credentialType": "usernamePassword",
+                        "fields": {
+                            "username": "user",
+                            "password": "pass"
+                        }
+                    }
+                ],
+                "pipeline": {
+                    "name": "TestPipeline",
+                    "stages": [
+                        {
+                            "name": "Build",
+                            "steps": [
+                                {"type": "echo", "message": "Hello"}
+                            ]
+                        }
+                    ]
+                }
+            }
+        }"#;
 
-        let config = PipelineConfig::from_yaml(yaml).expect("Should parse YAML");
+        let config = PipelineConfig::from_json(json).expect("Should parse JSON");
         assert_eq!(config.version, "1");
         assert_eq!(config.spec.libraries.len(), 1);
         assert_eq!(config.spec.environment.get("FOO"), Some(&"bar".to_string()));

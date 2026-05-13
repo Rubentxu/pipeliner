@@ -1,18 +1,16 @@
 [package]
-name = "pipeliner-core"
+name = "pipeliner-script"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.92.0"
-description = "Core domain types and Pipeline DSL for Pipeliner"
+description = "Script execution for Pipeliner - compile and run Rust scripts as pipeline steps"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/pipeliner-org/pipeliner"
-documentation = "https://docs.rs/pipeliner-core"
-keywords = ["pipeline", "dsl", "jenkins", "core"]
+keywords = ["pipeline", "script", "rust", "dsl"]
 categories = ["development-tools"]
 
 [features]
 default = []
-testing = ["dep:proptest"]
 
 [dependencies]
 # Workspace dependencies
@@ -20,26 +18,27 @@ serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 async-trait = { workspace = true }
-tokio = { workspace = true, features = ["rt-multi-thread"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "process"] }
 tracing = { workspace = true }
 uuid = { workspace = true, features = ["v4", "serde"] }
 chrono = { workspace = true, features = ["serde", "std"] }
 regex = { workspace = true }
 once_cell = { workspace = true }
 
-# Optional dependencies
-proptest = { workspace = true, optional = true }
+# Pipeliner crates
+pipeliner-core = { workspace = true }
+
+# Script execution
+sha1 = "0.10"
+hex = "0.4"
+dirs = "5.0"
+tempfile = { workspace = true }
+walkdir = { workspace = true }
 
 [dev-dependencies]
-serde_json = { workspace = true }
-tempfile = { workspace = true }
 pretty_assertions = { workspace = true }
-rstest = { workspace = true }
-proptest = { workspace = true }
+tempfile = { workspace = true }
 
 [lib]
-name = "pipeliner_core"
+name = "pipeliner_script"
 path = "src/lib.rs"
-
-[package.metadata.docs.rs]
-all-features = true

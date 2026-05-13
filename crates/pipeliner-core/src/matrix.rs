@@ -103,6 +103,32 @@ pub struct MatrixIterator {
 }
 
 impl MatrixConfig {
+    /// Creates a new empty matrix configuration (builder pattern)
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Adds a Values axis (builder pattern)
+    #[must_use]
+    pub fn add_axis(mut self, name: impl Into<String>, values: Vec<String>) -> Self {
+        self.axes.push(MatrixAxis::Values {
+            name: name.into(),
+            values,
+        });
+        self
+    }
+
+    /// Adds an exclusion rule (builder pattern)
+    #[must_use]
+    pub fn add_exclude(mut self, conditions: std::collections::HashMap<String, String>) -> Self {
+        self.exclude.push(MatrixExclude {
+            axes: conditions,
+            reason: None,
+        });
+        self
+    }
+
     /// Generates all matrix cell combinations
     #[must_use]
     pub fn generate_cells(&self) -> Vec<MatrixCell> {
@@ -422,5 +448,59 @@ mod tests {
             name_template: None,
         };
         assert!(config.validate().is_err());
+    }
+
+    // === Builder method tests ===
+
+    #[test]
+    fn test_matrix_builder_new() {
+        let config = MatrixConfig::new();
+        assert!(config.axes.is_empty());
+        assert!(config.exclude.is_empty());
+        assert!(config.agent.is_none());
+        assert!(config.name_template.is_none());
+    }
+
+    #[test]
+    fn test_matrix_builder_add_axis() {
+        let config = MatrixConfig::new()
+            .add_axis("os", vec!["linux".to_string(), "macos".to_string()])
+            .add_axis("arch", vec!["x64".to_string()]);
+
+        assert_eq!(config.axes.len(), 2);
+        match &config.axes[0] {
+            MatrixAxis::Values { name, values } => {
+                assert_eq!(name, "os");
+                assert_eq!(values.len(), 2);
+            }
+            _ => panic!("Expected Values axis"),
+        }
+    }
+
+    #[test]
+    fn test_matrix_builder_add_exclude() {
+        let config = MatrixConfig::new()
+            .add_axis("os", vec!["linux".to_string(), "macos".to_string()])
+            .add_exclude(HashMap::from([("os".to_string(), "linux".to_string())]));
+
+        assert_eq!(config.exclude.len(), 1);
+        assert_eq!(
+            config.exclude[0].axes.get("os"),
+            Some(&"linux".to_string())
+        );
+        assert!(config.exclude[0].reason.is_none());
+    }
+
+    #[test]
+    fn test_matrix_builder_chained() {
+        let config = MatrixConfig::new()
+            .add_axis("os", vec!["linux".to_string(), "macos".to_string()])
+            .add_axis("version", vec!["1.0".to_string(), "2.0".to_string()])
+            .add_exclude(HashMap::from([("os".to_string(), "linux".to_string())]));
+
+        let cells = config.generate_cells();
+        // os=linux excludes ALL cells with os=linux regardless of version
+        // So only macos cells remain: (macos,1.0), (macos,2.0) = 2 cells
+        assert_eq!(cells.len(), 2);
     }
 }

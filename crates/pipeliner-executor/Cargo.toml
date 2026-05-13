@@ -29,6 +29,7 @@ shell-words = { workspace = true }
 tempfile = { workspace = true, optional = true }
 
 # Serialization
+serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
 # Logging
@@ -43,6 +44,8 @@ uuid = { workspace = true, features = ["v4", "serde"] }
 chrono = { workspace = true, features = ["serde", "std"] }
 dirs = { workspace = true }
 glob = "0.3"
+regex = { workspace = true }
+once_cell = { workspace = true }
 
 [dev-dependencies]
 pipeliner-core = { path = "../pipeliner-core" }

@@ -1,26 +1,32 @@
 //! Pipeline configuration types for Pipeliner.
 //!
 //! This module provides types for parsing and validating pipeline configuration
-//! from YAML and JSON formats, including libraries, credentials, SCM, and environment settings.
+//! from JSON formats, including libraries, credentials, SCM, and environment settings.
 //!
 //! # Example
 //!
 //! ```rust
 //! use pipeliner_core::config::{PipelineConfig, RetrieverType, LibraryConfig};
 //!
-//! let yaml = r#"
-//! version: "1"
-//! spec:
-//!   pipeline:
-//!     name: MyPipeline
-//!     stages:
-//!       - name: Build
-//!         steps:
-//!           - type: echo
-//!             message: Hello
-//! "#;
+//! let json = r#"
+//! {
+//!     "version": "1",
+//!     "spec": {
+//!         "pipeline": {
+//!             "name": "MyPipeline",
+//!             "stages": [
+//!                 {
+//!                     "name": "Build",
+//!                     "steps": [
+//!                         {"type": "echo", "message": "Hello"}
+//!                     ]
+//!                 }
+//!             ]
+//!         }
+//!     }
+//! }"#;
 //!
-//! let config = PipelineConfig::from_yaml(yaml).expect("Valid YAML");
+//! let config = PipelineConfig::from_json(json).expect("Valid JSON");
 //! assert_eq!(config.version, "1");
 //! ```
 
@@ -33,8 +39,6 @@ use crate::pipeline::Pipeline;
 /// Configuration error types for pipeline configuration parsing and validation.
 #[derive(Debug)]
 pub enum ConfigError {
-    /// YAML parsing error
-    Yaml(serde_yaml::Error),
     /// JSON parsing error
     Json(serde_json::Error),
     /// Validation error with descriptive message
@@ -44,7 +48,6 @@ pub enum ConfigError {
 impl fmt::Display for ConfigError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ConfigError::Yaml(e) => write!(f, "YAML parsing error: {e}"),
             ConfigError::Json(e) => write!(f, "JSON parsing error: {e}"),
             ConfigError::Validation(msg) => write!(f, "Validation error: {msg}"),
         }
@@ -52,12 +55,6 @@ impl fmt::Display for ConfigError {
 }
 
 impl std::error::Error for ConfigError {}
-
-impl From<serde_yaml::Error> for ConfigError {
-    fn from(err: serde_yaml::Error) -> Self {
-        ConfigError::Yaml(err)
-    }
-}
 
 impl From<serde_json::Error> for ConfigError {
     fn from(err: serde_json::Error) -> Self {
@@ -68,7 +65,7 @@ impl From<serde_json::Error> for ConfigError {
 /// Pipeline configuration root type.
 ///
 /// This is the top-level configuration structure that can be parsed from
-/// YAML or JSON files defining a complete pipeline configuration.
+/// JSON files defining a complete pipeline configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PipelineConfig {
     /// Configuration version
@@ -78,18 +75,6 @@ pub struct PipelineConfig {
 }
 
 impl PipelineConfig {
-    /// Parse configuration from a YAML string.
-    ///
-    /// # Errors
-    ///
-    /// Returns `ConfigError::Yaml` if the YAML is malformed.
-    /// Returns `ConfigError::Validation` if the configuration fails validation.
-    pub fn from_yaml(yaml: &str) -> Result<Self, ConfigError> {
-        let config: PipelineConfig = serde_yaml::from_str(yaml)?;
-        config.validate()?;
-        Ok(config)
-    }
-
     /// Parse configuration from a JSON string.
     ///
     /// # Errors
@@ -250,32 +235,7 @@ mod tests {
     // =======================================================================
 
     #[test]
-    fn test_pipeline_config_from_yaml_roundtrip() {
-        // SCN-PC-004: Roundtrip serialization
-        let yaml = r#"
-version: "1"
-spec:
-  pipeline:
-    name: TestPipeline
-    stages:
-      - name: Build
-        steps:
-          - type: echo
-            message: Hello
-"#;
-
-        let config = PipelineConfig::from_yaml(yaml).expect("Should parse YAML");
-        assert_eq!(config.version, "1");
-        assert!(config.spec.pipeline.is_some());
-
-        // Roundtrip: serialize back to YAML and parse again
-        let yaml_out = serde_yaml::to_string(&config).expect("Should serialize to YAML");
-        let config2 = PipelineConfig::from_yaml(&yaml_out).expect("Should parse roundtripped YAML");
-        assert_eq!(config.version, config2.version);
-    }
-
-    #[test]
-    fn test_pipeline_config_from_json_with_minimal_yaml() {
+    fn test_pipeline_config_from_json_with_minimal_json() {
         // SCN-PC-003: Minimal JSON - version="1", pipeline with just a name and empty stages
         // Note: stages is required in Pipeline, so we provide minimal stages
         let json = r#"{
@@ -298,42 +258,56 @@ spec:
     #[test]
     fn test_pipeline_config_with_full_structure() {
         // SCN-PC-001: Full structure - libraries, scm, credentials, pipeline
-        let yaml = r#"
-version: "1"
-spec:
-  libraries:
-    - name: mylib
-      sourcePath: https://github.com/example/mylib
-      retrieverType: gitSource
-      defaultVersion: main
-      modules:
-        - name: core
-          path: src/core
-  environment:
-    FOO: bar
-    BAZ: qux
-  scm:
-    url: https://github.com/example/repo
-    branch: main
-    credentialsId: github-creds
-    shallowClone: true
-    submoduleRecursive: false
-  credentials:
-    - id: github-creds
-      credentialType: usernamePassword
-      fields:
-        username: user
-        password: pass
-  pipeline:
-    name: FullPipeline
-    stages:
-      - name: Test
-        steps:
-          - type: echo
-            message: Testing
-"#;
+        let json = r#"{
+            "version": "1",
+            "spec": {
+                "libraries": [
+                    {
+                        "name": "mylib",
+                        "sourcePath": "https://github.com/example/mylib",
+                        "retrieverType": "gitSource",
+                        "defaultVersion": "main",
+                        "modules": [
+                            {"name": "core", "path": "src/core"}
+                        ]
+                    }
+                ],
+                "environment": {
+                    "FOO": "bar",
+                    "BAZ": "qux"
+                },
+                "scm": {
+                    "url": "https://github.com/example/repo",
+                    "branch": "main",
+                    "credentialsId": "github-creds",
+                    "shallowClone": true,
+                    "submoduleRecursive": false
+                },
+                "credentials": [
+                    {
+                        "id": "github-creds",
+                        "credentialType": "usernamePassword",
+                        "fields": {
+                            "username": "user",
+                            "password": "pass"
+                        }
+                    }
+                ],
+                "pipeline": {
+                    "name": "FullPipeline",
+                    "stages": [
+                        {
+                            "name": "Test",
+                            "steps": [
+                                {"type": "echo", "message": "Testing"}
+                            ]
+                        }
+                    ]
+                }
+            }
+        }"#;
 
-        let config = PipelineConfig::from_yaml(yaml).expect("Should parse full YAML");
+        let config = PipelineConfig::from_json(json).expect("Should parse full JSON");
         assert_eq!(config.version, "1");
 
         // Libraries
@@ -373,12 +347,12 @@ spec:
     #[test]
     fn test_scm_config_serde_defaults() {
         // SCN-PC-005: Serde defaults - shallow_clone=true, submodule_recursive=true when omitted
-        let yaml = r#"
-url: https://github.com/example/repo
-branch: develop
-"#;
+        let json = r#"{
+            "url": "https://github.com/example/repo",
+            "branch": "develop"
+        }"#;
 
-        let scm: ScmConfig = serde_yaml::from_str(yaml).expect("Should parse SCM");
+        let scm: ScmConfig = serde_json::from_str(json).expect("Should parse SCM");
         assert_eq!(scm.url, "https://github.com/example/repo");
         assert_eq!(scm.branch, "develop");
         assert_eq!(scm.credentials_id, None);
@@ -504,25 +478,6 @@ branch: develop
     // =======================================================================
 
     #[test]
-    fn test_pipeline_config_from_yaml_invalid_returns_err() {
-        // A5.1: Invalid YAML returns Err
-        let invalid_yaml = r#"
-version: "1"
-spec:
-  pipeline:
-    name: [invalid yaml here
-"#;
-
-        let result = PipelineConfig::from_yaml(invalid_yaml);
-        assert!(result.is_err(), "Should return error for invalid YAML");
-        if let Err(ConfigError::Yaml(_)) = result {
-            // Expected error type
-        } else {
-            panic!("Expected ConfigError::Yaml variant");
-        }
-    }
-
-    #[test]
     fn test_pipeline_config_from_json_invalid_returns_err() {
         // A5.2: Invalid JSON returns Err
         let invalid_json = r#"{"version": "1", "spec": }"#;
@@ -536,45 +491,6 @@ spec:
         }
     }
 
-    #[test]
-    fn test_yaml_and_json_equivalent_inputs_produce_equal_config() {
-        // A5.3: YAML and JSON equivalent inputs produce equal PipelineConfig
-        let yaml_input = r#"
-version: "1"
-spec:
-  pipeline:
-    name: EquivPipeline
-    stages:
-      - name: Build
-        steps:
-          - type: echo
-            message: Test
-"#;
-
-        let json_input = r#"{
-            "version": "1",
-            "spec": {
-                "pipeline": {
-                    "name": "EquivPipeline",
-                    "stages": [
-                        {
-                            "name": "Build",
-                            "steps": [
-                                {"type": "echo", "message": "Test"}
-                            ]
-                        }
-                    ]
-                }
-            }
-        }"#;
-
-        let config_yaml = PipelineConfig::from_yaml(yaml_input).expect("Should parse YAML");
-        let config_json = PipelineConfig::from_json(json_input).expect("Should parse JSON");
-
-        assert_eq!(config_yaml.version, config_json.version);
-        assert_eq!(config_yaml.spec.pipeline, config_json.spec.pipeline);
-    }
-
     // =======================================================================
     // Validation Tests
     // =======================================================================
@@ -582,8 +498,8 @@ spec:
     #[test]
     fn test_config_error_display() {
         // Test that ConfigError implements Display correctly
-        let yaml_err = serde_yaml::from_str::<PipelineConfig>("not: valid").unwrap_err();
-        let config_err = ConfigError::Yaml(yaml_err);
+        let json_err = serde_json::from_str::<PipelineConfig>("not: valid").unwrap_err();
+        let config_err = ConfigError::Json(json_err);
         let display = format!("{}", config_err);
         assert!(!display.is_empty(), "ConfigError should implement Display");
     }
@@ -591,11 +507,11 @@ spec:
     #[test]
     fn test_empty_version_validation() {
         // Validation: empty version should fail
-        let yaml = r#"
-version: ""
-spec: {}
-"#;
-        let result = PipelineConfig::from_yaml(yaml);
+        let json = r#"{
+            "version": "",
+            "spec": {}
+        }"#;
+        let result = PipelineConfig::from_json(json);
         assert!(result.is_err());
         if let Err(ConfigError::Validation(msg)) = result {
             assert!(msg.contains("version"));
@@ -609,13 +525,13 @@ spec: {}
     #[test]
     fn test_library_config_defaults() {
         // LibraryConfig with minimal fields should use defaults
-        let yaml = r#"
-name: minimal-lib
-sourcePath: /path/to/lib
-retrieverType: localSource
-"#;
+        let json = r#"{
+            "name": "minimal-lib",
+            "sourcePath": "/path/to/lib",
+            "retrieverType": "localSource"
+        }"#;
 
-        let lib: LibraryConfig = serde_yaml::from_str(yaml).expect("Should parse minimal LibraryConfig");
+        let lib: LibraryConfig = serde_json::from_str(json).expect("Should parse minimal LibraryConfig");
         assert_eq!(lib.name, "minimal-lib");
         assert_eq!(lib.default_version, None, "default_version should be None by default");
         assert!(lib.modules.is_empty(), "modules should be empty by default");
@@ -624,12 +540,12 @@ retrieverType: localSource
     #[test]
     fn test_credential_config_defaults() {
         // CredentialConfig with minimal fields should use defaults
-        let yaml = r#"
-id: my-creds
-credentialType: secretText
-"#;
+        let json = r#"{
+            "id": "my-creds",
+            "credentialType": "secretText"
+        }"#;
 
-        let cred: CredentialConfig = serde_yaml::from_str(yaml).expect("Should parse minimal CredentialConfig");
+        let cred: CredentialConfig = serde_json::from_str(json).expect("Should parse minimal CredentialConfig");
         assert_eq!(cred.id, "my-creds");
         assert!(cred.fields.is_empty(), "fields should be empty by default");
     }
@@ -637,17 +553,21 @@ credentialType: secretText
     #[test]
     fn test_pipeline_spec_defaults() {
         // PipelineSpec with no optional fields should use defaults
-        let yaml = r#"
-pipeline:
-  name: TestPipeline
-  stages:
-    - name: Build
-      steps:
-        - type: echo
-          message: Hello
-"#;
+        let json = r#"{
+            "pipeline": {
+                "name": "TestPipeline",
+                "stages": [
+                    {
+                        "name": "Build",
+                        "steps": [
+                            {"type": "echo", "message": "Hello"}
+                        ]
+                    }
+                ]
+            }
+        }"#;
 
-        let spec: PipelineSpec = serde_yaml::from_str(yaml).expect("Should parse PipelineSpec");
+        let spec: PipelineSpec = serde_json::from_str(json).expect("Should parse PipelineSpec");
         assert!(spec.libraries.is_empty(), "libraries should be empty by default");
         assert!(spec.environment.is_empty(), "environment should be empty by default");
         assert!(spec.scm.is_none(), "scm should be None by default");

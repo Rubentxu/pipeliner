@@ -22,6 +22,17 @@ Thumbs.db
 *.o
 *.so
 *.dylib
+*.tar.gz
+*.tgz
+*.zip
+
+# Pipeliner script cache
+pipeliner-script-cache/
+pipeliner-script-binaries/
+
+# Temp directories
+tmp/
+temp/
 
 # Test output
 /test-results/
@@ -39,3 +50,7 @@ test_bollard.rs
 logs/
 .atl/
 .cognicode/
+
+# Reversa
+.reversa/config.user.toml
+_reversa_sdd/

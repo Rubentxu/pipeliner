@@ -1,0 +1,23 @@
+{
+  "name": "Simple Build",
+  "stages": [
+    {
+      "name": "greet",
+      "steps": [
+        {
+          "type": "echo",
+          "message": "Starting pipeline..."
+        }
+      ]
+    },
+    {
+      "name": "build",
+      "steps": [
+        {
+          "type": "shell",
+          "command": "echo 'Building project...'"
+        }
+      ]
+    }
+  ]
+}
