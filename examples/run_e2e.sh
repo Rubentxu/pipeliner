@@ -2,10 +2,11 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RUSTLINE="cargo run --quiet -p pipeliner-cli --bin pipeliner-cli --"
+# Option 1: Using cargo run with the root binary name
+PIPELINER="cargo run --quiet -p pipeliner --bin pipeliner --"
 
-# Or if using the root binary:
-# RUSTLINE="$SCRIPT_DIR/../target/debug/rustline"
+# Option 2: Using the compiled binary directly (after cargo build)
+# PIPELINER="$SCRIPT_DIR/../target/debug/pipeliner"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -62,10 +63,10 @@ echo ""
 # ========================================
 echo "--- CLI Basics ---"
 
-assert_exit "help shows successfully" 0 $RUSTLINE --help
-assert_output "help mentions script command" "script" $RUSTLINE --help
-assert_output "help mentions run command" "run" $RUSTLINE --help
-assert_exit "version shows successfully" 0 $RUSTLINE --version
+assert_exit "help shows successfully" 0 $PIPELINER --help
+assert_output "help mentions script command" "script" $PIPELINER --help
+assert_output "help mentions run command" "run" $PIPELINER --help
+assert_exit "version shows successfully" 0 $PIPELINER --version
 
 # ========================================
 # Section 2: Script Execution (Rust DSL)
@@ -74,19 +75,19 @@ echo ""
 echo "--- Rust Script Execution ---"
 
 # Test 01: Hello world script
-assert_output "hello script prints greeting" "Hello from Pipeliner" $RUSTLINE script "$SCRIPT_DIR/scripts/01-hello.rs"
+assert_output "hello script prints greeting" "Hello from Pipeliner" $PIPELINER script "$SCRIPT_DIR/scripts/01-hello.rs"
 
 # Test 02: Env vars script
-assert_output "env-vars script shows pipeline context" "Pipeline:" $RUSTLINE script "$SCRIPT_DIR/scripts/02-env-vars.rs"
+assert_output "env-vars script shows pipeline context" "Pipeline:" $PIPELINER script "$SCRIPT_DIR/scripts/02-env-vars.rs"
 
 # Test 03: Script with deps
-assert_output "deps script outputs JSON" '"pipeline"' $RUSTLINE script "$SCRIPT_DIR/scripts/03-with-deps.rs"
+assert_output "deps script outputs JSON" '"pipeline"' $PIPELINER script "$SCRIPT_DIR/scripts/03-with-deps.rs"
 
 # Test 04: Build and test script
-assert_output "build-test script runs stages" "Build Stage" $RUSTLINE script "$SCRIPT_DIR/scripts/04-build-and-test.rs"
+assert_output "build-test script runs stages" "Build Stage" $PIPELINER script "$SCRIPT_DIR/scripts/04-build-and-test.rs"
 
 # Test 05: Error handling script (should fail with exit 1)
-assert_exit "error-handling script exits with code 1" 1 $RUSTLINE script "$SCRIPT_DIR/scripts/05-error-handling.rs"
+assert_exit "error-handling script exits with code 1" 1 $PIPELINER script "$SCRIPT_DIR/scripts/05-error-handling.rs"
 
 # ========================================
 # Section 3: Pipeline JSON Execution
@@ -95,10 +96,10 @@ echo ""
 echo "--- Pipeline JSON Execution ---"
 
 # Test simple pipeline
-assert_output "simple pipeline runs" "Building project" $RUSTLINE run --file "$SCRIPT_DIR/pipelines/01-simple.json"
+assert_output "simple pipeline runs" "Building project" $PIPELINER run --file "$SCRIPT_DIR/pipelines/01-simple.json"
 
 # Test multi-stage pipeline
-assert_output "multi-stage pipeline runs" "Compiling" $RUSTLINE run --file "$SCRIPT_DIR/pipelines/02-with-scripts.json"
+assert_output "multi-stage pipeline runs" "Compiling" $PIPELINER run --file "$SCRIPT_DIR/pipelines/02-with-scripts.json"
 
 # ========================================
 # Section 4: CLI Commands
@@ -107,23 +108,23 @@ echo ""
 echo "--- CLI Commands ---"
 
 # Validate
-assert_exit "validate accepts valid pipeline" 0 $RUSTLINE validate --file "$SCRIPT_DIR/pipelines/01-simple.json"
+assert_exit "validate accepts valid pipeline" 0 $PIPELINER validate --file "$SCRIPT_DIR/pipelines/01-simple.json"
 
 # Check
-assert_exit "check accepts valid pipeline" 0 $RUSTLINE check --file "$SCRIPT_DIR/pipelines/01-simple.json"
+assert_exit "check accepts valid pipeline" 0 $PIPELINER check --file "$SCRIPT_DIR/pipelines/01-simple.json"
 
 # Init
 TMPDIR=$(mktemp -d)
-assert_exit "init creates pipeline file" 0 $RUSTLINE init --name "test-pipeline" --output "$TMPDIR/pipeline.json"
+assert_exit "init creates pipeline file" 0 $PIPELINER init --name "test-pipeline" --output "$TMPDIR/pipeline.json"
 assert_output "init file contains pipeline name" "test-pipeline" cat "$TMPDIR/pipeline.json"
 rm -rf "$TMPDIR"
 
 # Script with nonexistent file
-assert_exit "nonexistent script fails" 1 $RUSTLINE script "$SCRIPT_DIR/scripts/nonexistent.rs"
+assert_exit "nonexistent script fails" 1 $PIPELINER script "$SCRIPT_DIR/scripts/nonexistent.rs"
 
 # Script with non-.rs extension
 echo "not a rust script" > /tmp/test.txt
-assert_exit "non-rs file fails" 1 $RUSTLINE script /tmp/test.txt
+assert_exit "non-rs file fails" 1 $PIPELINER script /tmp/test.txt
 rm -f /tmp/test.txt
 
 # ========================================

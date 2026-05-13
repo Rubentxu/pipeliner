@@ -1,14 +1,14 @@
 [package]
-name = "rustline"
+name = "pipeliner"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.92.0"
-authors = ["Rustline Contributors"]
-description = "A Jenkins Pipeline DSL in Rust - CLI tools for rust-script"
+authors = ["Pipeliner Contributors"]
+description = "A Jenkins Pipeline DSL in Rust - CLI tools for pipelines"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/rustline-org/rustline"
-homepage = "https://github.com/rustline-org/rustline"
-documentation = "https://docs.rs/rustline"
+repository = "https://github.com/Rubentxu/pipeliner"
+homepage = "https://github.com/Rubentxu/pipeliner"
+documentation = "https://docs.rs/pipeliner"
 keywords = ["ci", "cd", "pipeline", "jenkins", "dsl"]
 categories = ["development-tools", "command-line-utilities"]
 readme = "README.md"
@@ -28,7 +28,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 pipeliner-cli = { path = "crates/pipeliner-cli" }
 
 [[bin]]
-name = "rustline"
+name = "pipeliner"
 path = "src/main.rs"
 
 [profile.release]

@@ -1,8 +1,8 @@
-//! rustline - CLI tools for Jenkins Pipeline DSL in Rust
+//! pipeliner - CLI tools for Pipeline DSL in Rust
 //!
-//! This binary delegates to the modern pipeliner CLI.
-//! The legacy rustline-specific commands (check, lint, doc, export)
-//! for .rs DSL files are available via the pipeliner CLI.
+//! This binary delegates to the pipeliner-cli library.
+//! The commands (run, script, validate, check, lint, doc, export)
+//! are available via this CLI.
 
 use std::process::ExitCode;
 

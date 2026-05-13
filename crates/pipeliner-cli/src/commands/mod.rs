@@ -16,7 +16,7 @@ pub mod script;
 
 /// Command-line interface for Pipeliner pipeline execution
 #[derive(Parser, Debug)]
-#[command(name = "rustline")]
+#[command(name = "pipeliner")]
 #[command(author, version, about, long_about = None)]
 struct Cli {
     #[command(subcommand)]
