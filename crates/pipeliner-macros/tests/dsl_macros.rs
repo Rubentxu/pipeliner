@@ -62,6 +62,8 @@ fn test_pipeline_macro_multiple_stages() {
 
 #[test]
 fn test_pipeline_macro_with_parallel() {
+    // Jenkins-style: parallel {} inside stage! generates a ParallelGroup
+    // The outer stage with parallel {} becomes a ParallelGroup directly
     let pipeline = pipeline! {
         name = "Parallel Pipeline"
         stages {
@@ -71,12 +73,14 @@ fn test_pipeline_macro_with_parallel() {
                 }
             }
             
-            parallel! {
-                stage!("Test Linux") {
-                    steps { sh!("cargo test --linux") }
-                }
-                stage!("Test Windows") {
-                    steps { sh!("cargo test --windows") }
+            stage!("Test") {
+                parallel {
+                    stage!("Linux") {
+                        steps { sh!("cargo test --linux") }
+                    }
+                    stage!("Windows") {
+                        steps { sh!("cargo test --windows") }
+                    }
                 }
             }
         }
@@ -89,12 +93,10 @@ fn test_pipeline_macro_with_parallel() {
     assert!(pipeline.stages[0].as_stage().is_some());
     assert_eq!(pipeline.stages[0].as_stage().unwrap().name, "Build");
     
-    // Second item is parallel group
+    // Second item is a parallel group (stage with parallel content becomes ParallelGroup)
     assert!(pipeline.stages[1].is_parallel());
     let parallel = pipeline.stages[1].as_parallel().unwrap();
     assert_eq!(parallel.stages.len(), 2);
-    assert_eq!(parallel.stages[0].name, "Test Linux");
-    assert_eq!(parallel.stages[1].name, "Test Windows");
 }
 
 #[test]

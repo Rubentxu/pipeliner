@@ -1,3 +1,49 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/pipeliner-core",
+    "crates/pipeliner-macros",
+    "crates/pipeliner-executor",
+]
+
+[workspace.dependencies]
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Async runtime
+tokio = { version = "1.35", features = ["full"] }
+async-trait = "0.1"
+
+# Error handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Logging and tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+# Utilities
+uuid = { version = "1.0", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde", "std"] }
+regex = "1.0"
+once_cell = "1.0"
+proptest = "1.0"
+quote = "1.0"
+syn = { version = "2.0", features = ["full"] }
+proc-macro2 = "1.0"
+rstest = "0.18"
+pretty_assertions = "1.0"
+tempfile = "3.0"
+dirs = "5.0"
+os_pipe = "0.9"
+shell-words = "1.0"
+which = "6.0"
+rustix = "0.38"
+memfd = "0.6"
+itertools = "0.13"
+indexmap = "2.0"
+
 [package]
 name = "pipeliner"
 version = "0.1.0"
@@ -18,21 +64,8 @@ all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
-# Async runtime
-tokio = { version = "1.35", features = ["full"] }
-
-# Logging and observability
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
-
-# Workspace crates
-pipeliner-cli = { path = "crates/pipeliner-cli" }
-pipeliner-core = { path = "crates/pipeliner-core" }
-pipeliner-macros = { path = "crates/pipeliner-macros" }
-pipeliner-executor = { path = "crates/pipeliner-executor" }
-
-[[bin]]
-name = "pipeliner"
-path = "src/main.rs"
+tokio = { workspace = true }
+tracing-subscriber = { workspace = true }
 
 [profile.release]
 opt-level = 3
