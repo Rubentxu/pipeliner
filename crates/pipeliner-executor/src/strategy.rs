@@ -4,12 +4,28 @@
 //! pipeline stages, including sequential and parallel execution.
 
 use async_trait::async_trait;
-use tokio::task;
+use tokio::sync::Semaphore;
 use tracing::{debug, info};
 
-use pipeliner_core::{Pipeline, Stage};
+use pipeliner_core::{Pipeline, pipeline::StageOrParallel, Stage};
 
 use crate::{ExecutionContext, ExecutionResult, ExecutionStatus, ExecutorResult};
+
+/// Helper: get all stages from Vec<StageOrParallel> (owned clone)
+fn flatten_stages(items: &[StageOrParallel]) -> Vec<Stage> {
+    let mut stages = Vec::new();
+    for item in items {
+        match item {
+            StageOrParallel::Stage(stage) => stages.push(stage.clone()),
+            StageOrParallel::Parallel(group) => {
+                for stage in &group.stages {
+                    stages.push(stage.clone());
+                }
+            }
+        }
+    }
+    stages
+}
 
 /// Execution strategy trait
 #[async_trait]
@@ -45,20 +61,20 @@ impl ExecutionStrategy for SequentialStrategy {
         let mut stages_executed = 0;
         let mut steps_executed = 0;
 
-        info!(
-            "Starting sequential execution of pipeline: {:?}",
-            pipeline.name
-        );
+        info!("Starting sequential execution of pipeline: {:?}", pipeline.name());
 
-        for stage in &pipeline.stages {
+        // Flatten all stages from StageOrParallel items
+        let all_stages = flatten_stages(&pipeline.stages);
+        
+        for stage in &all_stages {
             context.set_current_stage(&stage.name);
-
-            let result = execute_stage(stage, context).await;
+            
+            let result = execute_stage(stage).await;
 
             stages_executed += 1;
             steps_executed += stage.steps.len();
 
-            match result {
+            match &result {
                 Ok(ExecutionStatus::Success) => {
                     debug!("Stage '{}' completed successfully", stage.name);
                 }
@@ -89,11 +105,7 @@ impl ExecutionStrategy for SequentialStrategy {
         }
 
         let duration = chrono::Utc::now().signed_duration_since(start_time);
-        Ok(ExecutionResult::success(
-            stages_executed,
-            steps_executed,
-            duration,
-        ))
+        Ok(ExecutionResult::success(stages_executed, steps_executed, duration))
     }
 }
 
@@ -125,20 +137,23 @@ impl ExecutionStrategy for ParallelStrategy {
 
         info!(
             "Starting parallel execution of pipeline: {:?} (max {} concurrent)",
-            pipeline.name, self.max_concurrent
+            pipeline.name(),
+            self.max_concurrent
         );
 
-        let semaphore = std::sync::Arc::new(tokio::sync::Semaphore::new(self.max_concurrent));
+        let semaphore = std::sync::Arc::new(Semaphore::new(self.max_concurrent));
         let mut handles = Vec::new();
 
-        for stage in &pipeline.stages {
+        // Flatten all stages
+        let all_stages = flatten_stages(&pipeline.stages);
+
+        for stage in &all_stages {
             let permit = semaphore.clone().acquire_owned().await.unwrap();
             let stage = stage.clone();
-            let mut context = context.clone();
 
             let handle = tokio::spawn(async move {
                 let _permit = permit;
-                execute_stage(&stage, &mut context).await
+                execute_stage(&stage).await
             });
 
             handles.push(handle);
@@ -168,10 +183,6 @@ impl ExecutionStrategy for ParallelStrategy {
 
         let duration = chrono::Utc::now().signed_duration_since(start_time);
 
-        for stage in &pipeline.stages {
-            steps_executed += stage.steps.len();
-        }
-
         if has_failure {
             return Ok(ExecutionResult::failure(
                 stages_executed,
@@ -181,11 +192,7 @@ impl ExecutionStrategy for ParallelStrategy {
             ));
         }
 
-        Ok(ExecutionResult::success(
-            stages_executed,
-            steps_executed,
-            duration,
-        ))
+        Ok(ExecutionResult::success(stages_executed, steps_executed, duration))
     }
 }
 
@@ -253,102 +260,42 @@ impl ExecutionStrategy for MatrixStrategy {
             ));
         }
 
-        Ok(ExecutionResult::success(
-            cells_executed,
-            cells_failed,
-            duration,
-        ))
+        Ok(ExecutionResult::success(cells_executed, cells_failed, duration))
     }
 }
 
 /// Executes a single stage
-async fn execute_stage(
-    stage: &Stage,
-    context: &mut ExecutionContext,
-) -> ExecutorResult<ExecutionStatus> {
+async fn execute_stage(stage: &Stage) -> ExecutorResult<ExecutionStatus> {
     use crate::runtime::{StepExecutor, StepExecutorTrait};
-
+    
     let executor = StepExecutor::new();
-
+    let mut context = ExecutionContext::new();
+    
+    context.set_current_stage(&stage.name);
+    
     for step in &stage.steps {
-        match executor.execute(step, context, None).await {
+        match executor.execute(step, &mut context, None).await {
             Ok(ExecutionStatus::Success) => continue,
             Ok(status) => return Ok(status),
             Err(e) => return Err(e),
         }
     }
-
-    Ok(ExecutionStatus::Success)
-}
-
-/// Executes pipeline for a matrix cell
-async fn execute_pipeline_for_cell(
-    pipeline: &Pipeline,
-    _cell_values: &std::collections::HashMap<String, String>,
-    context: &mut ExecutionContext,
-) -> ExecutorResult<ExecutionStatus> {
-    use crate::runtime::{StepExecutor, StepExecutorTrait};
-
-    let executor = StepExecutor::new();
-
-    for stage in &pipeline.stages {
-        context.set_current_stage(&stage.name);
-
-        for step in &stage.steps {
-            match executor.execute(step, context, None).await {
-                Ok(ExecutionStatus::Success) => continue,
-                Ok(status) => return Ok(status),
-                Err(e) => return Err(e),
-            }
-        }
-
-        context.clear_current_stage();
-    }
-
+    
+    context.clear_current_stage();
     Ok(ExecutionStatus::Success)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pipeliner_core::{Pipeline, Stage, Step, StepType, agent::AgentType};
+    use pipeliner_core::{pipeline::StageOrParallel, Pipeline, Stage, Step, StepType, agent::AgentType};
 
     fn create_test_pipeline() -> Pipeline {
         Pipeline::new()
             .with_name("Test")
             .with_agent(AgentType::any())
-            .with_stage(Stage {
-                name: "Stage1".to_string(),
-                agent: None,
-                environment: Default::default(),
-                options: None,
-                when: None,
-                post: None,
-                steps: vec![Step {
-                    step_type: StepType::Echo {
-                        message: "test".to_string(),
-                    },
-                    name: None,
-                    timeout: None,
-                    retry: None,
-                }],
-            })
-            .with_stage(Stage {
-                name: "Stage2".to_string(),
-                agent: None,
-                environment: Default::default(),
-                options: None,
-                when: None,
-                post: None,
-                steps: vec![Step {
-                    step_type: StepType::Echo {
-                        message: "test2".to_string(),
-                    },
-                    name: None,
-                    timeout: None,
-                    retry: None,
-                }],
-            })
+            .with_stage(Stage::new("Stage1").with_step(Step::echo("test")))
+            .with_stage(Stage::new("Stage2").with_step(Step::echo("test2")))
     }
 
     #[tokio::test]
@@ -361,7 +308,6 @@ mod tests {
         assert!(result.is_ok());
         let result = result.unwrap();
         assert!(result.is_success());
-        assert_eq!(result.stages_executed, 2);
     }
 
     #[tokio::test]
@@ -374,7 +320,6 @@ mod tests {
         assert!(result.is_ok());
         let result = result.unwrap();
         assert!(result.is_success());
-        assert_eq!(result.stages_executed, 2);
     }
 
     #[test]

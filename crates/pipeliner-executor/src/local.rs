@@ -633,14 +633,14 @@ impl LocalExecutor {
         }
 
         println!("[DRY-RUN] Would execute {} stages:", pipeline.stages.len());
-        
+
         for stage_or_parallel in &pipeline.stages {
             // For parallel, execute all stages
             let stages: Vec<&Stage> = match stage_or_parallel {
                 pipeliner_core::pipeline::StageOrParallel::Stage(s) => vec![s],
                 pipeliner_core::pipeline::StageOrParallel::Parallel(g) => g.stages.iter().collect(),
             };
-            
+
             for stage in stages {
                 let stage_name = &stage.name;
                 // Check if stage would be filtered
@@ -648,7 +648,7 @@ impl LocalExecutor {
                     println!("[DRY-RUN]   [SKIP] {}", stage_name);
                     continue;
                 }
-                
+
                 println!("[DRY-RUN]   Stage: {}", stage_name);
                 for step in &stage.steps {
                     let step_name = step.name.clone().unwrap_or_else(|| "unnamed".to_string());
@@ -723,15 +723,15 @@ impl UnifiedExecutor for LocalExecutor {
 
         // Execute in dry-run mode (returns empty results)
         let _results = dry_executor.execute(pipeline).await;
-
+        
         // Return a successful result indicating dry run completed
+        let step_count: usize = pipeline.stages.iter()
+            .flat_map(|item| item.all_steps())
+            .count();
+        
         Ok(ExecutionResult::success(
             pipeline.stages.len(),
-            pipeline
-                .stages
-                .iter()
-                .map(|s| s.steps.len())
-                .sum::<usize>(),
+            step_count,
             chrono::Duration::from_std(start.elapsed()).unwrap_or_default(),
         ))
     }

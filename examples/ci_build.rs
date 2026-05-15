@@ -64,8 +64,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Pipeline: {}", pl.name().unwrap_or_default());
     println!("Stages: {}", pl.stages.len());
-    for (i, stage) in pl.stages.iter().enumerate() {
-        println!("  {}. {} ({} steps)", i + 1, stage.name, stage.steps.len());
+    for (i, item) in pl.stages.iter().enumerate() {
+        match item {
+            pipeliner_core::pipeline::StageOrParallel::Stage(s) => println!("  {}. {} ({} steps)", i + 1, s.name, s.steps.len()),
+            pipeliner_core::pipeline::StageOrParallel::Parallel(g) => println!("  {}. parallel ({} stages)", i + 1, g.stages.len()),
+        }
     }
     
     // Run the pipeline
