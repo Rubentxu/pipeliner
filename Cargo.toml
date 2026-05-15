@@ -6,6 +6,15 @@ members = [
     "crates/pipeliner-executor",
 ]
 
+# Example crates (declarative pipelines)
+[[example]]
+name = "simple-ci"
+path = "examples/src/main.rs"
+
+[[example]]
+name = "petclinic"
+path = "examples/petclinic.rs"
+
 [workspace.dependencies]
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -66,6 +75,8 @@ rustdoc-args = ["--cfg", "docsrs"]
 [dependencies]
 tokio = { workspace = true }
 tracing-subscriber = { workspace = true }
+pipeliner-macros = { path = "crates/pipeliner-macros" }
+pipeliner-core = { path = "crates/pipeliner-core" }
 
 [profile.release]
 opt-level = 3

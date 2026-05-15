@@ -1,4 +1,23 @@
 //! Pipeliner DSL - Jenkins-style declarative pipelines
+//!
+//! # Jenkins-style 100% Declarative
+//!
+//! ```ignore
+//! pipeline_exec! {
+//!     name = "CI"
+//!     stages {
+//!         stage!("Build") { steps { sh!("cargo build") } }
+//!         stage!("Test") {
+//!             parallel {
+//!                 stage!("Linux") { steps { sh!("test") } }
+//!                 stage!("Windows") { steps { sh!("test") } }
+//!             }
+//!         }
+//!     }
+//! }
+//! ```
+//!
+//! That's it! No main(), no #[tokio::main], no code outside the DSL.
 
 use proc_macro::TokenStream;
 use quote::quote;
@@ -263,4 +282,123 @@ fn parse_steps(g: &proc_macro2::Group) -> Vec<StepDef> {
         i += 1;
     }
     steps
+}
+
+// =============================================================================
+// pipeline_exec! - 100% Declarative Jenkins-style pipeline
+// Generates main() and executes automatically
+// =============================================================================
+
+/// Execute a pipeline immediately - 100% declarative, no main() needed
+///
+/// # Example
+///
+/// ```ignore
+/// pipeline_exec! {
+///     name = "CI Pipeline"
+///     stages {
+///         stage!("Build") { steps { sh!("cargo build") } }
+///     }
+/// }
+/// ```
+///
+/// This expands to a complete runnable program with main() and tokio runtime.
+#[proc_macro]
+pub fn pipeline_exec(input: TokenStream) -> TokenStream {
+    let pipeline = match parse_pipeline(input.into()) {
+        Ok(p) => p,
+        Err(e) => return e.to_compile_error().into(),
+    };
+    
+    let name = pipeline.name.as_ref()
+        .map(|n| quote! { .with_name(#n) })
+        .unwrap_or_else(|| quote! {});
+    
+    let mut stage_exprs: Vec<_> = vec![];
+    
+    for s in &pipeline.stages {
+        match &s.content {
+            StageContent::Steps(steps) => {
+                let nm = &s.name;
+                let step_exprs: Vec<_> = steps.iter().map(|s| match s {
+                    StepDef::Shell(cmd) => quote! { Step::shell(#cmd) },
+                    StepDef::Echo(msg) => quote! { Step::echo(#msg) },
+                }).collect();
+                stage_exprs.push(quote! { Stage::new(#nm).with_steps(vec![#(#step_exprs),*]) });
+            }
+            StageContent::Parallel(sub) => {
+                let sub_exprs: Vec<_> = sub.iter().map(|s| {
+                    let sn = &s.name;
+                    let steps = match &s.content {
+                        StageContent::Steps(steps) => steps.iter().map(|step| match step {
+                            StepDef::Shell(cmd) => quote! { Step::shell(#cmd) },
+                            StepDef::Echo(msg) => quote! { Step::echo(#msg) },
+                        }).collect::<Vec<_>>(),
+                        _ => vec![],
+                    };
+                    quote! { Stage::new(#sn).with_steps(vec![#(#steps),*]) }
+                }).collect();
+                stage_exprs.push(quote! { Pipeline::parallel(vec![#(#sub_exprs),*]) });
+            }
+        }
+    }
+    
+    let pipeline_expr = if stage_exprs.is_empty() {
+        return syn::Error::new_spanned(
+            &proc_macro2::TokenTree::Group(proc_macro2::Group::new(
+                proc_macro2::Delimiter::Brace, 
+                proc_macro2::TokenStream::new()
+            )), 
+            "No stages found in pipeline!"
+        ).to_compile_error().into();
+    } else {
+        let mut expr = quote! { Pipeline::new() #name };
+        for se in stage_exprs {
+            expr = quote! { #expr.with_stage(#se) };
+        }
+        expr
+    };
+    
+    let pipeline_name = pipeline.name.clone().unwrap_or_else(|| "Unnamed".to_string());
+    
+    quote! {
+        fn main() {
+            use pipeliner_core::{Pipeline, Stage, Step, PipelineRunner};
+            use tracing_subscriber::EnvFilter;
+            
+            // Set up minimal logging
+            let _ = tracing_subscriber::fmt()
+                .with_env_filter(EnvFilter::from_default_env())
+                .try_init();
+            
+            // Build the pipeline
+            let mut pipeline = #pipeline_expr;
+            
+            // Run with tokio
+            let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
+            rt.block_on(async {
+                let name = #pipeline_name;
+                eprintln!("\n╔══════════════════════════════════════════╗");
+                eprintln!("║  {}  ║", format!("{:^38}", name));
+                eprintln!("╚══════════════════════════════════════════╝\n");
+                
+                let mut runner = PipelineRunner::new();
+                match runner.run_async(&pipeline).await {
+                    Ok(result) => {
+                        eprintln!("\n📊 Results:");
+                        eprintln!("   Success: {}", if result.success { "✅" } else { "❌" });
+                        eprintln!("   Duration: {}ms", result.duration_ms);
+                        eprintln!("   Stages: {}", result.stages_executed);
+                        eprintln!("   Steps: {}", result.steps_executed);
+                        
+                        std::process::exit(if result.success { 0 } else { 1 });
+                    }
+                    Err(e) => {
+                        eprintln!("❌ Pipeline failed: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+            });
+        }
+    }.into()
 }
