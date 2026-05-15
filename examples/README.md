@@ -1,85 +1,88 @@
 # Pipeliner — Ejemplos de Pipelines en Rust DSL
 
-> ⚠️ **IMPORTANTE**: Pipeliner usa **Rust DSL** para definir pipelines. Los archivos `.json` son solo para serialización. NO uses YAML para definir pipelines.
+> ⚠️ **IMPORTANTE**: Pipeliner usa **Rust DSL** para definir pipelines con macros estilo Jenkinsfile. Los archivos `.json` son solo para serialización. NO uses YAML para definir pipelines.
 
-## Cómo Definir un Pipeline
-
-Los pipelines son **código Rust** que usa las structs de `pipeliner-core`:
+## Sintaxis DSL Estilo Jenkinsfile
 
 ```rust
-use pipeliner_core::{Pipeline, Stage, Step};
-use pipeliner_macros::{sh, echo};
+use pipeliner_macros::pipeline;
 
-let pipeline = Pipeline::new()
-    .with_name("Mi Pipeline")
-    .with_stage(
-        Stage::new("Build")
-            .with_step(sh!("cargo build --release"))
-            .with_step(echo!("Build done!"))
-    );
+let my_pipeline = pipeline! {
+    name = "Mi Pipeline CI"
+    
+    stages {
+        stage!("Build") {
+            steps {
+                sh!("cargo build --release")
+                echo!("Build complete!")
+            }
+        }
+        
+        stage!("Test") {
+            steps {
+                sh!("cargo test --all")
+            }
+        }
+    }
+};
 ```
 
 ## Ejemplos Disponibles
 
-### 1. Build + Test CI
-**Archivo**: `pipelines/build_and_test.rs`
+### 1. CI Build Pipeline
+**Archivo**: `pipelines/ci_build.rs`
 
 Pipeline CI típico que compila, testea y verifica el binary.
 
 ```bash
-cargo run --example build_and_test
+cargo run --example ci_build
 ```
 
-### 2. Git Clone + Build + Test
-**Archivo**: `pipelines/git_clone_build.rs`
+### 2. PetClinic CI Pipeline
+**Archivo**: `pipelines/petclinic_ci.rs`
 
-Clona un repositorio, lo compila y ejecuta tests.
+Clona el repositorio Spring PetClinic, lo compila y ejecuta tests.
 
 ```bash
-REPO_URL=https://github.com/spring-projects/spring-petclinic.git \
-  cargo run --example git_clone_build
-```
-
-### 3. Agent Pipeline
-**Archivo**: `crates/pipeliner-agent/examples/agent-pipeline.rs`
-
-Usa LLM como step del pipeline.
-
-```bash
-cargo run -p pipeliner-agent --example agent-pipeline
-```
-
-## Estructura de un Pipeline
-
-```rust
-Pipeline::new()
-    .with_name("Nombre")
-    .with_stage(Stage::new("Nombre Stage")
-        .with_step(Step::shell("comando"))
-        .with_step(Step::echo("mensaje"))
-    )
+cargo run --example petclinic_ci
 ```
 
 ## Macros Disponibles
 
-| Macro | Descripción |
-|-------|-------------|
-| `sh!("comando")` | Ejecuta comando shell |
-| `echo!("msg")` | Imprime mensaje |
-| `stage!("nombre", vec![...])` | Crea stage con steps |
+| Macro | Descripción | Ejemplo |
+|-------|-------------|---------|
+| `pipeline! { ... }` | Pipeline completo | `pipeline! { name = "X" stages { ... } }` |
+| `stage!("name") { ... }` | Stage con steps | `stage!("Build") { steps { ... } }` |
+| `steps { ... }` | Bloque de pasos | Dentro de stage |
+| `sh!("cmd")` | Comando shell | `sh!("cargo build")` |
+| `echo!("msg")` | Mensaje | `echo!("Done!")` |
 
-## Pasos Disponibles
-
-| Tipo | Constructor |
-|------|-------------|
-| Shell | `Step::shell("cmd")` o `sh!("cmd")` |
-| Echo | `Step::echo("msg")` o `echo!("msg")` |
-| Agent | `Step::agent(config)` |
-
-## Serialización
-
-Los pipelines se pueden serializar a JSON:
+## Estructura Completa de Pipeline
 
 ```rust
-let json = serde_json::to_string_pretty(&pipeline).unwrap();
+pipeline! {
+    name = "Nombre del Pipeline"
+    
+    stages {
+        stage!("Stage 1") {
+            steps {
+                sh!("comando 1")
+                sh!("comando 2")
+                echo!("Mensaje")
+            }
+        }
+        
+        stage!("Stage 2") {
+            steps {
+                sh!("otro comando")
+            }
+        }
+    }
+}
 ```
+
+## Notas
+
+- Los pipelines se definen como código Rust compilado
+- Los macros internos (`sh!`, `echo!`) se expanden dentro del contexto de `pipeline!`
+- El pipeline puede serializarse a JSON para persistencia

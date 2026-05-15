@@ -242,3 +242,119 @@ fn test_agent_config_serialization() {
     assert_eq!(deserialized.model, "claude");
     assert_eq!(deserialized.prompt, "Analyze code");
 }
+
+// ============================================================================
+// Pipeline! Macro Tests (Jenkinsfile-style DSL)
+// ============================================================================
+
+use pipeliner_macros::{pipeline, sh, echo};
+
+#[test]
+fn test_pipeline_macro_simple() {
+    let pipeline = pipeline! {
+        name = "Test Pipeline"
+        agent(any)
+        
+        stages {
+            stage!("Build") {
+                steps {
+                    sh!("cargo build")
+                    echo!("Build done")
+                }
+            }
+        }
+    };
+    
+    assert_eq!(pipeline.name(), Some("Test Pipeline"));
+    assert_eq!(pipeline.stages.len(), 1);
+    assert_eq!(pipeline.stages[0].name, "Build");
+    assert_eq!(pipeline.stages[0].steps.len(), 2);
+}
+
+#[test]
+fn test_pipeline_macro_multiple_stages() {
+    let pipeline = pipeline! {
+        name = "CI Pipeline"
+        agent(any)
+        
+        stages {
+            stage!("Build") {
+                steps {
+                    sh!("cargo build --release")
+                }
+            }
+            
+            stage!("Test") {
+                steps {
+                    sh!("cargo test")
+                }
+            }
+            
+            stage!("Verify") {
+                steps {
+                    sh!("ls -lh target/release")
+                    echo!("Done!")
+                }
+            }
+        }
+    };
+    
+    assert_eq!(pipeline.name(), Some("CI Pipeline"));
+    assert_eq!(pipeline.stages.len(), 3);
+    assert_eq!(pipeline.stages[0].name, "Build");
+    assert_eq!(pipeline.stages[1].name, "Test");
+    assert_eq!(pipeline.stages[2].name, "Verify");
+}
+
+#[test]
+fn test_pipeline_macro_petclinic_style() {
+    let pipeline = pipeline! {
+        name = "PetClinic CI"
+        agent(any)
+        
+        stages {
+            stage!("Prerequisites") {
+                steps {
+                    sh!("which git")
+                    sh!("which java")
+                    sh!("which mvn")
+                }
+            }
+            
+            stage!("Clone") {
+                steps {
+                    sh!("git clone https://github.com/spring-projects/spring-petclinic.git /tmp/petclinic")
+                }
+            }
+            
+            stage!("Build") {
+                steps {
+                    sh!("cd /tmp/petclinic && ./mvnw package -DskipTests")
+                }
+            }
+            
+            stage!("Test") {
+                steps {
+                    sh!("cd /tmp/petclinic && ./mvnw test")
+                }
+            }
+            
+            stage!("Report") {
+                steps {
+                    sh!("cd /tmp/petclinic && find . -name '*.jar' -type f")
+                    sh!("echo 'Pipeline SUCCESS'")
+                }
+            }
+        }
+    };
+    
+    assert_eq!(pipeline.name(), Some("PetClinic CI"));
+    assert_eq!(pipeline.stages.len(), 5);
+    
+    // Verify stage names
+    assert_eq!(pipeline.stages[0].name, "Prerequisites");
+    assert_eq!(pipeline.stages[1].name, "Clone");
+    assert_eq!(pipeline.stages[2].name, "Build");
+    assert_eq!(pipeline.stages[3].name, "Test");
+    assert_eq!(pipeline.stages[4].name, "Report");
+}
