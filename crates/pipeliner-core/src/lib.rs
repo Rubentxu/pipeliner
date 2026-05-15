@@ -96,7 +96,7 @@ pub use logging::LogLevel;
 pub use matrix::{MatrixAxis, MatrixConfig, MatrixExclude};
 pub use options::{PipelineOptions, Retry, Timeout, Trigger};
 pub use parameters::{ParameterType, Parameters};
-pub use pipeline::{Pipeline, Stage, Step, StepType, StepWhenCondition, EnvCheck};
+pub use pipeline::{Pipeline, Stage, Step, StepType, StepWhenCondition, EnvCheck, LlmAgentConfig};
 pub use context::PipelineContext;
 pub use registry::{CustomStep, StepError, StepFactory, StepRegistry};
 pub use runtime::{LifecyclePhase, PhaseResult, PipelineRuntime, PipelineRunResult, RuntimeError};

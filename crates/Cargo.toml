@@ -22,6 +22,8 @@ members = [
     "pipeliner-steps-policy",
     "pipeliner-steps-artifact",
     "pipeliner-steps-notify",
+    "pipeliner-agent",
+    "pipeliner-mcp",
 ]
 
 resolver = "1"

@@ -114,6 +114,9 @@ impl StepExecutorTrait for StepExecutor {
             StepType::Checkout { scm } => {
                 self.execute_checkout(scm, step, context).await
             }
+            StepType::Agent { config } => {
+                self.execute_agent(config, step, context).await
+            }
         };
 
         context.clear_current_step();
@@ -318,6 +321,53 @@ impl StepExecutor {
                     reason: format!("Git clone failed: {}", stderr),
                 },
             ))
+        }
+    }
+
+    async fn execute_agent(
+        &self,
+        config: &pipeliner_core::LlmAgentConfig,
+        step: &Step,
+        context: &mut ExecutionContext,
+    ) -> ExecutorResult<ExecutionStatus> {
+        use pipeliner_agent::{AgentExecutor, AgentResult, AgentStatus};
+
+        info!(
+            model = %config.model,
+            prompt_len = config.prompt.len(),
+            "Executing agent step"
+        );
+
+        // Create agent executor
+        let executor = AgentExecutor::new();
+
+        // Execute the agent
+        let result = executor.execute(config).await.map_err(|e| {
+            error!("Agent execution failed: {}", e);
+            crate::ExecutorError::from(crate::ExecutorErrorKind::StepFailed {
+                reason: format!("Agent failed: {}", e),
+            })
+        })?;
+
+        // Store result in context for downstream steps
+        if let Some(output) = &result.output {
+            context.set_metadata("AGENT_OUTPUT", output.clone());
+        }
+
+        // Return status based on result
+        match result.status {
+            AgentStatus::Success => {
+                if let Some(output) = result.output {
+                    debug!("Agent output: {} chars", output.len());
+                }
+                Ok(ExecutionStatus::Success)
+            }
+            AgentStatus::Failure => {
+                let error_msg = result.error.unwrap_or_else(|| "Agent failed".to_string());
+                error!("Agent failed: {}", error_msg);
+                Ok(ExecutionStatus::Failure)
+            }
+            AgentStatus::Skipped => Ok(ExecutionStatus::Skipped),
         }
     }
 

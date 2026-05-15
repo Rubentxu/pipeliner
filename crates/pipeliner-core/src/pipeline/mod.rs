@@ -14,7 +14,7 @@ use crate::structure::{PipelineStructure, StageStructure, StepStructure};
 use crate::validation::{Validate, ValidationError};
 
 /// A pipeline definition
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Pipeline {
     /// Pipeline name
@@ -87,7 +87,7 @@ fn default_threshold() -> String {
 }
 
 /// A single stage in a pipeline
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Stage {
     /// Stage name
@@ -317,7 +317,7 @@ impl EnvCheck {
 }
 
 /// Post-condition for stage completion
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct PostCondition {
     /// Always run
@@ -345,8 +345,105 @@ pub struct PostCondition {
     pub cleanup: Vec<Step>,
 }
 
+/// Configuration for an LLM agent step
+///
+/// Used with `StepType::Agent` to configure LLM-powered execution.
+/// 
+/// Note: This is different from `agent::AgentConfig` which is for container agents.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LlmAgentConfig {
+    /// Model to use (e.g., "claude-3-5-sonnet", "gpt-4")
+    #[serde(default = "default_model")]
+    pub model: String,
+
+    /// System prompt / instruction for the agent
+    #[serde(default)]
+    pub prompt: String,
+
+    /// Maximum tokens in response
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u32>,
+
+    /// Temperature (0.0-1.0), controls randomness
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
+
+    /// Tool names to make available to the agent
+    #[serde(default)]
+    pub tools: Vec<String>,
+
+    /// Path to skill file (.md) for additional context
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skill: Option<String>,
+}
+
+fn default_model() -> String {
+    "gpt-4".to_string()
+}
+
+impl Default for LlmAgentConfig {
+    fn default() -> Self {
+        Self {
+            model: default_model(),
+            prompt: String::new(),
+            max_tokens: Some(4096),
+            temperature: Some(0.7),
+            tools: Vec::new(),
+            skill: None,
+        }
+    }
+}
+
+impl LlmAgentConfig {
+    /// Create a new LlmAgentConfig with required model
+    pub fn new(model: impl Into<String>) -> Self {
+        Self {
+            model: model.into(),
+            ..Default::default()
+        }
+    }
+
+    /// Set the model (chainable)
+    #[must_use]
+    pub fn with_model(mut self, model: impl Into<String>) -> Self {
+        self.model = model.into();
+        self
+    }
+
+    /// Set the prompt
+    pub fn with_prompt(mut self, prompt: impl Into<String>) -> Self {
+        self.prompt = prompt.into();
+        self
+    }
+
+    /// Set max tokens
+    pub fn with_max_tokens(mut self, max_tokens: u32) -> Self {
+        self.max_tokens = Some(max_tokens);
+        self
+    }
+
+    /// Set temperature
+    pub fn with_temperature(mut self, temperature: f32) -> Self {
+        self.temperature = Some(temperature);
+        self
+    }
+
+    /// Add tools
+    pub fn with_tools(mut self, tools: Vec<String>) -> Self {
+        self.tools = tools;
+        self
+    }
+
+    /// Set skill file path
+    pub fn with_skill(mut self, skill: impl Into<String>) -> Self {
+        self.skill = Some(skill.into());
+        self
+    }
+}
+
 /// A single step in a stage
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum StepType {
     /// Shell command execution
@@ -500,6 +597,15 @@ pub enum StepType {
         /// SCM configuration for checkout
         scm: crate::config::ScmConfig,
     },
+
+    /// Agent execution step using LLM
+    ///
+    /// Executes an agent with an LLM to perform tasks.
+    /// Uses the Rig framework for LLM integration.
+    Agent {
+        /// Agent configuration
+        config: LlmAgentConfig,
+    },
 }
 
 /// Step parameter definition
@@ -532,7 +638,7 @@ pub enum StepParameter {
 }
 
 /// A step with metadata
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Step {
     /// Step type
@@ -665,6 +771,7 @@ impl Pipeline {
                             StepType::Is { .. } => "is",
                             StepType::WithCredentials { .. } => "with_credentials",
                             StepType::Checkout { .. } => "checkout",
+                            StepType::Agent { .. } => "agent",
                         }
                         .to_string(),
                         command: match &step.step_type {
@@ -776,6 +883,13 @@ impl Stage {
         self
     }
 
+    /// Sets all steps for this stage
+    #[must_use]
+    pub fn with_steps(mut self, steps: Vec<Step>) -> Self {
+        self.steps = steps;
+        self
+    }
+
     /// Sets the environment for this stage
     #[must_use]
     pub fn with_environment(mut self, environment: Environment) -> Self {
@@ -819,6 +933,17 @@ impl Step {
             step_type: StepType::Echo {
                 message: message.into(),
             },
+            name: None,
+            timeout: None,
+            retry: None,
+        }
+    }
+
+    /// Creates a new agent step
+    #[must_use]
+    pub fn agent(config: LlmAgentConfig) -> Self {
+        Self {
+            step_type: StepType::Agent { config },
             name: None,
             timeout: None,
             retry: None,

@@ -1,163 +1,137 @@
 //! Procedural macros for Pipeliner DSL.
 //!
-//! This crate provides custom derive macros and procedural macros
-//! for defining pipelines in a more ergonomic way.
+//! This crate provides procedural macros for defining pipelines
+//! in a Jenkinsfile-style DSL.
 //!
 //! ## Available Macros
 //!
-//! - `pipeline!`: Define a pipeline (returns Pipeline)
-//! - `run!`: Execute a pipeline immediately
+//! ### Step macros
+//! - `sh!("command")` - Shell command step
+//! - `echo!("message")` - Echo message step
+//! - `agent!("model") { ... }` - LLM agent step
 //!
-//! ## Simplified DSL Usage
+//! ### Stage macros
+//! - `stage!("name", vec![...steps...])` - Stage with steps
+//!
+//! ## Usage
 //!
 //! ```rust,ignore
-//! use pipeliner_core::prelude::*;
+//! use pipeliner_core::{Pipeline, Stage, Step, LlmAgentConfig};
+//! use pipeliner_macros::{sh, echo, stage};
 //!
-//! let pipeline = pipeline! {
-//!     agent { docker("rust:latest") }
-//!     stages {
-//!         stage!("Build", steps!(
-//!             sh!("cargo build")
-//!         ))
-//!     }
-//! };
-//!
-//! run!(pipeline);  // Execute immediately!
+//! let pipeline = Pipeline::new()
+//!     .with_name(\"My Pipeline\")
+//!     .with_stage(stage!(\"Build\", vec![
+//!         sh!(\"cargo build\"),
+//!         echo!(\"Build complete!\"),
+//!     ]));
 //! ```
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{DeriveInput, Expr, parse_macro_input};
+use syn::Expr;
 
-/// Execute a pipeline immediately with LocalExecutor.
+/// Create a shell command step
 ///
 /// # Example
-///
 /// ```rust,ignore
-/// use pipeliner_core::prelude::*;
-/// use pipeliner_macros::run;
-///
-/// let pipeline = pipeline! {
-///     agent { any() }
-///     stages { stage!("Test", steps!(sh!("cargo test"))) }
-/// };
-///
-/// run!(pipeline);
+/// sh!("cargo build --release")
 /// ```
 #[proc_macro]
-pub fn run(input: TokenStream) -> TokenStream {
-    let pipeline = parse_macro_input!(input as Expr);
+pub fn sh(input: TokenStream) -> TokenStream {
+    let command: Expr = syn::parse(input).expect("Expected a string literal");
 
-    let expanded = quote! {
-        {
-            use pipeliner_executor::LocalExecutor;
-            let executor = LocalExecutor::new();
-            let result = executor.execute(&#pipeline);
-            eprintln!("[PIPELINE] Executed with {} step results", result.len());
-            result
-        }
-    };
-
-    TokenStream::from(expanded)
+    quote! {
+        pipeliner_core::Step::shell(#command)
+    }
+    .into()
 }
 
-/// Execute a pipeline with custom executor.
+/// Create an echo message step
 ///
 /// # Example
-///
 /// ```rust,ignore
-/// use pipeliner_core::prelude::*;
-/// use pipeliner_executor::DockerExecutor;
-/// use pipeliner_macros::run_with;
-///
-/// let pipeline = pipeline! { ... };
-/// let executor = DockerExecutor::new("rust:latest");
-/// run_with!(pipeline, executor);
+/// echo!("Hello, world!")
 /// ```
 #[proc_macro]
-pub fn run_with(input: TokenStream) -> TokenStream {
-    let mut input = parse_macro_input!(input as Expr);
-    let inputs: Vec<Expr> = vec![];
-    let expanded = quote! {};
+pub fn echo(input: TokenStream) -> TokenStream {
+    let message: Expr = syn::parse(input).expect("Expected a string literal");
 
-    TokenStream::from(expanded)
+    quote! {
+        pipeliner_core::Step::echo(#message)
+    }
+    .into()
 }
 
-/// Execute a pipeline in debug mode with verbose output.
+/// Create a stage with steps
+///
+/// # Example
+/// ```rust,ignore
+/// stage!("Build", vec![sh!("cargo build"), echo!("Done!")])
+/// ```
 #[proc_macro]
-pub fn debug_run(input: TokenStream) -> TokenStream {
-    let pipeline = parse_macro_input!(input as Expr);
-
-    let expanded = quote! {
-        {
-            use pipeliner_executor::LocalExecutor;
-            use pipeliner_core::Pipeline;
-
-            eprintln!("[DEBUG] Pipeline name: {:?}", #pipeline.name());
-            eprintln!("[DEBUG] Stages: {}", #pipeline.stages.len());
-
-            for (i, stage) in #pipeline.stages.iter().enumerate() {
-                eprintln!("[DEBUG]   Stage {}: {} ({} steps)",
-                    i + 1, stage.name, stage.steps.len());
+pub fn stage(input: TokenStream) -> TokenStream {
+    // Parse: "name", [steps...]
+    let input_expr: Expr = syn::parse(input).expect("Expected (name, [steps...])");
+    
+    match input_expr {
+        Expr::Tuple(tuple) => {
+            if tuple.elems.len() != 2 {
+                return syn::Error::new_spanned(
+                    &tuple,
+                    "stage! expects format: stage!(\"name\", [steps...])"
+                ).to_compile_error().into();
             }
-
-            let executor = LocalExecutor::new();
-            let result = executor.execute(&#pipeline);
-            eprintln!("[DEBUG] Result: {} steps executed", result.len());
-            result
+            
+            let name = &tuple.elems[0];
+            let steps = &tuple.elems[1];
+            
+            quote! {
+                pipeliner_core::Stage::new(#name)
+                    .with_steps(#steps)
+            }.into()
         }
-    };
-
-    TokenStream::from(expanded)
+        _ => {
+            syn::Error::new_spanned(
+                &input_expr,
+                "stage! expects format: stage!(\"name\", [steps...])"
+            ).to_compile_error().into()
+        }
+    }
 }
 
-/// Derive macro for Pipeline trait.
-#[proc_macro_derive(Pipeline)]
-pub fn pipeline_derive(input: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(input as DeriveInput);
-    let name = &input.ident;
-
-    let expanded = quote! {
-        impl pipeliner_core::Pipeline for #name {
-            fn name(&self) -> Option<&str> {
-                self.name.as_deref()
+/// Create an agent step with configuration
+///
+/// # Example
+/// ```rust,ignore
+/// agent!("claude-3-5-sonnet", LlmAgentConfig::new("claude").with_prompt("Hello"))
+/// ```
+#[proc_macro]
+pub fn agent(input: TokenStream) -> TokenStream {
+    // Parse: "model", config_expr
+    let input_expr: Expr = syn::parse(input).expect("Expected (model, config)");
+    
+    match input_expr {
+        Expr::Tuple(tuple) => {
+            if tuple.elems.len() != 2 {
+                return syn::Error::new_spanned(
+                    &tuple,
+                    "agent! expects format: agent!(\"model\", config)"
+                ).to_compile_error().into();
             }
+            
+            let model = &tuple.elems[0];
+            let config = &tuple.elems[1];
+            
+            quote! {
+                pipeliner_core::Step::agent(#config.with_model(#model))
+            }.into()
         }
-    };
-
-    TokenStream::from(expanded)
-}
-
-/// Derive macro for Stage trait.
-#[proc_macro_derive(Stage)]
-pub fn stage_derive(input: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(input as DeriveInput);
-    let name = &input.ident;
-
-    let expanded = quote! {
-        impl pipeliner_core::Stage for #name {
-            fn name(&self) -> &str {
-                &self.name
-            }
+        _ => {
+            syn::Error::new_spanned(
+                &input_expr,
+                "agent! expects format: agent!(\"model\", config)"
+            ).to_compile_error().into()
         }
-    };
-
-    TokenStream::from(expanded)
-}
-
-/// Derive macro for Step trait.
-#[proc_macro_derive(Step)]
-pub fn step_derive(input: TokenStream) -> TokenStream {
-    let input = parse_macro_input!(input as DeriveInput);
-    let name = &input.ident;
-
-    let expanded = quote! {
-        impl pipeliner_core::Step for #name {
-            fn step_type(&self) -> &pipeliner_core::StepType {
-                &self.step_type
-            }
-        }
-    };
-
-    TokenStream::from(expanded)
+    }
 }

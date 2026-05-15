@@ -16,10 +16,13 @@ quote = "1.0"
 syn = { version = "2.0", features = ["full", "extra-traits"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+pipeliner-core = { path = "../pipeliner-core" }
 
 [dev-dependencies]
 trybuild = "1.0"
 predicates = "3.0"
+pipeliner-core = { path = "../pipeliner-core" }
+pretty_assertions = "1.4"
 
 [lib]
 path = "src/lib.rs"
