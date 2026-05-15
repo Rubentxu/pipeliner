@@ -1,0 +1,27 @@
+name: CI Build + Test + Verify
+stages:
+  - build
+  - test
+  - verify-binary
+
+build:
+  stage: Build
+  steps:
+    - cargo: cargo build --release
+
+test:
+  stage: Test
+  steps:
+    - cargo test --all
+
+verify-binary:
+  stage: Verify
+  steps:
+    - cargo: ls -lh target/release/pipeliner
+    - stat: stat target/release/pipeliner
+    - echo: "Build: SUCCESS ✅"
+
+notify:
+  stage: Report
+  steps:
+    - echo: "Pipeline $PIPELINE_NAME completed"

@@ -1,0 +1,25 @@
+name: Build and Test
+on: push
+
+pipeline:
+  stages:
+    - build
+    - test
+    - verify-binary
+
+build:
+    stage: Build
+    steps:
+      - cargo build --release
+
+test:
+    stage: Test
+    steps:
+      - cargo test --all
+
+verify-binary:
+    stage: Verify
+    steps:
+      - cargo build --release --bin pipeliner
+      - echo "Binary: target/release/pipeliner"
+      - stat -c "Size: %s bytes"
