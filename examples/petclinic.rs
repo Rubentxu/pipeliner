@@ -43,10 +43,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             
+            // Jenkins-style parallel: goes INSIDE stage, replacing steps
             stage!("Test") {
-                steps {
-                    sh!("cd /tmp/petclinic && ./mvnw test")
-                    echo!("Tests completed!")
+                parallel {
+                    stage!("Unit Tests") {
+                        steps {
+                            sh!("cd /tmp/petclinic && ./mvnw test -Dtest=*ControllerTest")
+                            echo!("Unit tests done!")
+                        }
+                    }
+                    stage!("Integration Tests") {
+                        steps {
+                            sh!("cd /tmp/petclinic && ./mvnw test -Dtest=*RepositoryTest")
+                            echo!("Integration tests done!")
+                        }
+                    }
                 }
             }
             
