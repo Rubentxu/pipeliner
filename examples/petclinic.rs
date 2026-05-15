@@ -6,46 +6,61 @@
 //!
 //! Requiere: git, java, maven
 
-use pipeliner_core::{Pipeline, PipelineRunner, Stage, Step};
+use pipeliner_core::{Pipeline, Stage, Step, PipelineRunner};
+use pipeliner_macros::pipeline;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== PetClinic CI Pipeline ===\n");
 
-    let pl = Pipeline::new()
-        .with_name("PetClinic CI")
-        .with_stage(
-            Stage::new("Prerequisites")
-                .with_step(Step::shell("which git && git --version"))
-                .with_step(Step::shell("which java && java -version"))
-                .with_step(Step::shell("which mvn && mvn --version"))
-                .with_step(Step::echo("Prerequisites satisfied!")),
-        )
-        .with_stage(
-            Stage::new("Clone")
-                .with_step(Step::shell("cd /tmp && rm -rf petclinic 2>/dev/null; true"))
-                .with_step(Step::shell("git clone https://github.com/spring-projects/spring-petclinic.git /tmp/petclinic"))
-                .with_step(Step::shell("cd /tmp/petclinic && ls -la"))
-                .with_step(Step::echo("Repository cloned!")),
-        )
-        .with_stage(
-            Stage::new("Build")
-                .with_step(Step::shell("cd /tmp/petclinic && ./mvnw package -DskipTests"))
-                .with_step(Step::echo("Build completed!")),
-        )
-        .with_stage(
-            Stage::new("Test")
-                .with_step(Step::shell("cd /tmp/petclinic && ./mvnw test"))
-                .with_step(Step::echo("Tests completed!")),
-        )
-        .with_stage(
-            Stage::new("Report")
-                .with_step(Step::shell("cd /tmp/petclinic && find . -name '*.jar' -type f 2>/dev/null | head -5"))
-                .with_step(Step::shell("cd /tmp/petclinic && du -sh target/ 2>/dev/null || echo 'No target dir'"))
-                .with_step(Step::shell("cd /tmp/petclinic && echo '=== BUILD SUCCESS ==='"))
-                .with_step(Step::shell("cd /tmp/petclinic && echo 'Pipeline completed at: $(date)'"))
-                .with_step(Step::echo("Pipeline complete!")),
-        );
+    // DSL declarativo estilo Jenkinsfile
+    let pl = pipeline! {
+        name = "PetClinic CI"
+        
+        stages {
+            stage!("Prerequisites") {
+                steps {
+                    sh!("which git && git --version")
+                    sh!("which java && java -version")
+                    sh!("which mvn && mvn --version")
+                    echo!("Prerequisites satisfied!")
+                }
+            }
+            
+            stage!("Clone") {
+                steps {
+                    sh!("cd /tmp && rm -rf petclinic 2>/dev/null; true")
+                    sh!("git clone https://github.com/spring-projects/spring-petclinic.git /tmp/petclinic")
+                    sh!("cd /tmp/petclinic && ls -la")
+                    echo!("Repository cloned!")
+                }
+            }
+            
+            stage!("Build") {
+                steps {
+                    sh!("cd /tmp/petclinic && ./mvnw package -DskipTests")
+                    echo!("Build completed!")
+                }
+            }
+            
+            stage!("Test") {
+                steps {
+                    sh!("cd /tmp/petclinic && ./mvnw test")
+                    echo!("Tests completed!")
+                }
+            }
+            
+            stage!("Report") {
+                steps {
+                    sh!("cd /tmp/petclinic && find . -name '*.jar' -type f 2>/dev/null | head -5")
+                    sh!("cd /tmp/petclinic && du -sh target/ 2>/dev/null || echo 'No target dir'")
+                    sh!("cd /tmp/petclinic && echo '=== BUILD SUCCESS ==='")
+                    sh!("cd /tmp/petclinic && echo 'Pipeline completed at: $(date)'")
+                    echo!("Pipeline complete!")
+                }
+            }
+        }
+    };
 
     println!("Pipeline: {}", pl.name().unwrap_or_default());
     println!("Stages: {}", pl.stages.len());

@@ -1,38 +1,66 @@
 //! Pipeline CI: Build + Test + Verify
 //!
-//! Ejecuta un pipeline CI/CD completo usando el DSL de Pipeliner.
+//! Ejecuta un pipeline CI/CD completo usando el DSL declarativo de Pipeliner.
 //!
 //! Run: cargo run --example ci_build
+//!
+//! Este ejemplo usa la sintaxis declarativa estilo Jenkinsfile/Groovy:
+//!
+//! ```rust,ignore
+//! pipeline! {
+//!     name = "CI Pipeline"
+//!     stages {
+//!         stage!("Build") {
+//!             steps {
+//!                 sh!("cargo build")
+//!             }
+//!         }
+//!     }
+//! }
+//! ```
 
-use pipeliner_core::{Pipeline, PipelineRunner, Stage, Step};
+use pipeliner_core::{Pipeline, Stage, Step, PipelineRunner};
+use pipeliner_macros::pipeline;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== CI Build Pipeline ===\n");
 
-    let pl = Pipeline::new()
-        .with_name("CI Build Pipeline")
-        .with_stage(
-            Stage::new("Prerequisites")
-                .with_step(Step::shell("which git"))
-                .with_step(Step::shell("which cargo"))
-                .with_step(Step::echo("Prerequisites verified!")),
-        )
-        .with_stage(
-            Stage::new("Build")
-                .with_step(Step::shell("cargo build --release"))
-                .with_step(Step::echo("Build completed!")),
-        )
-        .with_stage(
-            Stage::new("Test")
-                .with_step(Step::shell("cargo test --all"))
-                .with_step(Step::echo("All tests passed!")),
-        )
-        .with_stage(
-            Stage::new("Verify")
-                .with_step(Step::shell("ls -lh target/release/pipeliner 2>/dev/null || ls -lh target/debug/pipeliner"))
-                .with_step(Step::echo("Binary verified!")),
-        );
+    // DSL declarativo estilo Jenkinsfile
+    let pl = pipeline! {
+        name = "CI Build Pipeline"
+        
+        stages {
+            stage!("Prerequisites") {
+                steps {
+                    sh!("which git")
+                    sh!("which cargo")
+                    echo!("Prerequisites verified!")
+                }
+            }
+            
+            stage!("Build") {
+                steps {
+                    sh!("cargo build --release")
+                    echo!("Build completed!")
+                }
+            }
+            
+            stage!("Test") {
+                steps {
+                    sh!("cargo test --all")
+                    echo!("All tests passed!")
+                }
+            }
+            
+            stage!("Verify") {
+                steps {
+                    sh!("ls -lh target/release/pipeliner 2>/dev/null || ls -lh target/debug/pipeliner")
+                    echo!("Binary verified!")
+                }
+            }
+        }
+    };
 
     println!("Pipeline: {}", pl.name().unwrap_or_default());
     println!("Stages: {}", pl.stages.len());

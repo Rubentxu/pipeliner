@@ -247,7 +247,7 @@ fn test_agent_config_serialization() {
 // Pipeline! Macro Tests (Jenkinsfile-style DSL)
 // ============================================================================
 
-use pipeliner_macros::{pipeline, sh, echo};
+use pipeliner_macros::pipeline;
 
 #[test]
 fn test_pipeline_macro_simple() {

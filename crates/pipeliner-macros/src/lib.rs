@@ -1,8 +1,30 @@
 //! Procedural macros for Pipeliner DSL.
+//!
+//! This crate provides the `pipeline!` macro for defining pipelines
+//! in a Jenkinsfile-style declarative syntax.
+//!
+//! ## Usage
+//!
+//! ```rust,ignore
+//! use pipeliner_core::{Pipeline, Stage, PipelineRunner};
+//! use pipeliner_macros::pipeline;
+//!
+//! let pl = pipeline! {
+//!     name = "CI Pipeline"
+//!     
+//!     stages {
+//!         stage!("Build") {
+//!             steps {
+//!                 sh!("cargo build --release")
+//!                 echo!("Build complete!")
+//!             }
+//!         }
+//!     }
+//! };
+//! ```
 
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::Expr;
 
 /// Pipeline definition
 #[derive(Default)]
@@ -11,10 +33,16 @@ struct PipelineDef {
     stages: Vec<StageDef>,
 }
 
-/// Stage definition - stores raw tokens for steps
+/// Stage definition
 struct StageDef {
     name: String,
-    steps_tokens: Vec<proc_macro2::TokenStream>,
+    steps: Vec<StepDef>,
+}
+
+/// Step definition
+enum StepDef {
+    Shell(String),
+    Echo(String),
 }
 
 /// Create a declarative pipeline
@@ -27,6 +55,7 @@ struct StageDef {
 ///         stage!("Build") {
 ///             steps {
 ///                 sh!("cargo build")
+///                 echo!("Build done!")
 ///             }
 ///         }
 ///     }
@@ -45,22 +74,26 @@ pub fn pipeline(input: TokenStream) -> TokenStream {
         .unwrap_or_else(|| quote! {});
     
     // Build stage expressions
-    let mut stage_exprs = Vec::new();
-    for s in &pipeline.stages {
+    let stage_exprs: Vec<_> = pipeline.stages.iter().map(|s| {
         let stage_name = &s.name;
         
-        // Generate each step from raw tokens
-        let step_exprs: Vec<proc_macro2::TokenStream> = s.steps_tokens.iter()
-            .map(|tokens| {
-                tokens.clone()
-            })
-            .collect();
+        // Generate steps
+        let step_exprs: Vec<_> = s.steps.iter().map(|step| {
+            match step {
+                StepDef::Shell(cmd) => quote! {
+                    Step::shell(#cmd)
+                },
+                StepDef::Echo(msg) => quote! {
+                    Step::echo(#msg)
+                },
+            }
+        }).collect();
         
-        stage_exprs.push(quote! {
+        quote! {
             Stage::new(#stage_name)
                 .with_steps(vec![#(#step_exprs),*])
-        });
-    }
+        }
+    }).collect();
     
     // Chain with_stage() calls
     let mut pipeline_expr = quote! { Pipeline::new() #name };
@@ -143,9 +176,9 @@ fn parse_stages_from_tokens(tokens: &[proc_macro2::TokenTree]) -> (Vec<StageDef>
                         i += 1; // skip name group
                         
                         // Parse stage body from brace group
-                        let steps_tokens = if let Some(proc_macro2::TokenTree::Group(body)) = tokens.get(i) {
+                        let steps = if let Some(proc_macro2::TokenTree::Group(body)) = tokens.get(i) {
                             if body.delimiter() == proc_macro2::Delimiter::Brace {
-                                parse_steps_tokens(&body)
+                                parse_steps_from_tokens(&body)
                             } else {
                                 Vec::new()
                             }
@@ -154,7 +187,7 @@ fn parse_stages_from_tokens(tokens: &[proc_macro2::TokenTree]) -> (Vec<StageDef>
                         };
                         i += 1;
                         
-                        stages.push(StageDef { name, steps_tokens });
+                        stages.push(StageDef { name, steps });
                         continue;
                     }
                 }
@@ -166,39 +199,48 @@ fn parse_stages_from_tokens(tokens: &[proc_macro2::TokenTree]) -> (Vec<StageDef>
     (stages, i)
 }
 
-fn parse_steps_tokens(body: &proc_macro2::Group) -> Vec<proc_macro2::TokenStream> {
+/// Parse steps from a stage body - handles sh! and echo! DSL syntax
+fn parse_steps_from_tokens(body: &proc_macro2::Group) -> Vec<StepDef> {
     let body_tokens: Vec<_> = body.stream().into_iter().collect();
     let mut i = 0;
     let mut steps = Vec::new();
     
+    // Find the steps block
     while i < body_tokens.len() {
-        // Look for steps keyword
         if let proc_macro2::TokenTree::Ident(id) = &body_tokens[i] {
             if id.to_string() == "steps" {
                 i += 1;
                 // Get the brace group with steps
-                if let Some(proc_macro2::TokenTree::Group(g)) = body_tokens.get(i) {
+                if let proc_macro2::TokenTree::Group(g) = &body_tokens[i] {
                     if g.delimiter() == proc_macro2::Delimiter::Brace {
-                        // Collect all tokens inside steps block
                         let step_tokens: Vec<_> = g.stream().into_iter().collect();
                         
-                        // Group tokens by macro invocations (sh!, echo!, etc.)
+                        // Parse each step
                         let mut j = 0;
                         while j < step_tokens.len() {
-                            // Check if this is a macro invocation (Ident followed by !)
+                            // Look for sh! or echo! invocations
                             if let proc_macro2::TokenTree::Ident(id) = &step_tokens[j] {
-                                if j + 1 < step_tokens.len() {
+                                let macro_name = id.to_string();
+                                
+                                if (macro_name == "sh" || macro_name == "echo") 
+                                    && j + 2 < step_tokens.len() {
+                                    
+                                    // Check for ! 
                                     if let proc_macro2::TokenTree::Punct(p) = &step_tokens[j + 1] {
                                         if p.to_string() == "!" {
-                                            // Found macro invocation, collect whole thing
-                                            // Find matching group
-                                            if let Some(proc_macro2::TokenTree::Group(_)) = step_tokens.get(j + 2) {
-                                                // Collect macro name + ! + group
-                                                let mut macro_tokens = Vec::new();
-                                                macro_tokens.push(step_tokens[j].clone());
-                                                macro_tokens.push(step_tokens[j + 1].clone());
-                                                macro_tokens.push(step_tokens[j + 2].clone());
-                                                steps.push(macro_tokens.into_iter().collect());
+                                            // Found macro invocation
+                                            // Get the argument group
+                                            if let proc_macro2::TokenTree::Group(arg_group) = &step_tokens[j + 2] {
+                                                // Extract the string argument
+                                                let arg_str = arg_group.to_string();
+                                                let arg = arg_str.trim_matches('"');
+                                                
+                                                match macro_name.as_str() {
+                                                    "sh" => steps.push(StepDef::Shell(arg.to_string())),
+                                                    "echo" => steps.push(StepDef::Echo(arg.to_string())),
+                                                    _ => {}
+                                                }
+                                                
                                                 j += 3;
                                                 continue;
                                             }
@@ -217,97 +259,4 @@ fn parse_steps_tokens(body: &proc_macro2::Group) -> Vec<proc_macro2::TokenStream
     }
     
     steps
-}
-
-// ============================================================================
-// Step Macros (sh, echo)
-// ============================================================================
-
-/// Create a shell command step
-#[proc_macro]
-pub fn sh(input: TokenStream) -> TokenStream {
-    let command: Expr = syn::parse(input).expect("Expected a string literal");
-    quote! {
-        pipeliner_core::Step::shell(#command)
-    }
-    .into()
-}
-
-/// Create an echo message step
-#[proc_macro]
-pub fn echo(input: TokenStream) -> TokenStream {
-    let message: Expr = syn::parse(input).expect("Expected a string literal");
-    quote! {
-        pipeliner_core::Step::echo(#message)
-    }
-    .into()
-}
-
-// ============================================================================
-// Stage Macro
-// ============================================================================
-
-/// Create a stage with steps
-#[proc_macro]
-pub fn stage(input: TokenStream) -> TokenStream {
-    let input_expr: Expr = syn::parse(input).expect("Expected (name, [steps...])");
-    
-    match input_expr {
-        Expr::Tuple(tuple) => {
-            if tuple.elems.len() != 2 {
-                return syn::Error::new_spanned(
-                    &tuple,
-                    "stage! expects format: stage!(\"name\", [steps...])"
-                ).to_compile_error().into();
-            }
-            
-            let name = &tuple.elems[0];
-            let steps = &tuple.elems[1];
-            
-            quote! {
-                pipeliner_core::Stage::new(#name)
-                    .with_steps(#steps)
-            }.into()
-        }
-        _ => {
-            syn::Error::new_spanned(
-                &input_expr,
-                "stage! expects format: stage!(\"name\", [steps...])"
-            ).to_compile_error().into()
-        }
-    }
-}
-
-// ============================================================================
-// Agent Macro
-// ============================================================================
-
-/// Create an agent step with configuration
-#[proc_macro]
-pub fn agent(input: TokenStream) -> TokenStream {
-    let input_expr: Expr = syn::parse(input).expect("Expected (model, config)");
-    
-    match input_expr {
-        Expr::Tuple(tuple) => {
-            if tuple.elems.len() != 2 {
-                return syn::Error::new_spanned(
-                    &tuple,
-                    "agent! expects format: agent!(\"model\", config)"
-                ).to_compile_error().into();
-            }
-            
-            let model = &tuple.elems[0];
-            let config = &tuple.elems[1];
-            
-            quote! {
-                pipeliner_core::Step::agent(#config.with_model(#model))
-            }.into()
-        }
-        _ => {
-            syn::Error::new_spanned(
-                &input_expr,
-                "agent! expects format: agent!(\"model\", config)"
-            ).to_compile_error().into()
-        }
-    }
 }
