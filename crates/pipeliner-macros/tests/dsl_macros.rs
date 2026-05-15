@@ -1,11 +1,11 @@
 use pipeliner_core::{
     Pipeline, Stage, Step, pipeline::StageOrParallel,
 };
-use pipeliner_macros::pipeline;
+use pipeliner_macros::pipeline_def;
 
 #[test]
 fn test_pipeline_macro_simple() {
-    let pipeline = pipeline! {
+    let pipeline = pipeline_def! {
         name = "Test Pipeline"
         stages {
             stage!("Build") {
@@ -27,7 +27,7 @@ fn test_pipeline_macro_simple() {
 
 #[test]
 fn test_pipeline_macro_multiple_stages() {
-    let pipeline = pipeline! {
+    let pipeline = pipeline_def! {
         name = "CI Pipeline"
         stages {
             stage!("Build") {
@@ -64,7 +64,7 @@ fn test_pipeline_macro_multiple_stages() {
 fn test_pipeline_macro_with_parallel() {
     // Jenkins-style: parallel {} inside stage! generates a ParallelGroup
     // The outer stage with parallel {} becomes a ParallelGroup directly
-    let pipeline = pipeline! {
+    let pipeline = pipeline_def! {
         name = "Parallel Pipeline"
         stages {
             stage!("Build") {
@@ -101,7 +101,7 @@ fn test_pipeline_macro_with_parallel() {
 
 #[test]
 fn test_pipeline_macro_petclinic_style() {
-    let pipeline = pipeline! {
+    let pipeline = pipeline_def! {
         name = "PetClinic CI"
         stages {
             stage!("Prerequisites") {

@@ -8,7 +8,7 @@
 #[macro_use]
 extern crate pipeliner_macros;
 
-pipeline_exec! {
+pipeline! {
     name = "Simple CI"
     stages {
         stage!("Environment") {
