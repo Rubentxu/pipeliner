@@ -1,88 +1,90 @@
-# Pipeliner — Ejemplos de Pipelines en Rust DSL
+# Pipeliner — Ejemplos
 
-> ⚠️ **IMPORTANTE**: Pipeliner usa **Rust DSL** para definir pipelines con macros estilo Jenkinsfile. Los archivos `.json` son solo para serialización. NO uses YAML para definir pipelines.
+Pipeliner puede usarse de dos formas:
 
-## Sintaxis DSL Estilo Jenkinsfile
+## 1. Como Librería (Rust crate)
 
-```rust
-use pipeliner_macros::pipeline;
+Importa las structs y ejecuta pipelines programáticamente:
 
-let my_pipeline = pipeline! {
-    name = "Mi Pipeline CI"
-    
-    stages {
-        stage!("Build") {
-            steps {
-                sh!("cargo build --release")
-                echo!("Build complete!")
-            }
-        }
-        
-        stage!("Test") {
-            steps {
-                sh!("cargo test --all")
-            }
-        }
-    }
-};
+```bash
+# Ejecutar examples
+cargo run --example ci_build
+cargo run --example petclinic
 ```
 
-## Ejemplos Disponibles
-
-### 1. CI Build Pipeline
-**Archivo**: `pipelines/ci_build.rs`
-
-Pipeline CI típico que compila, testea y verifica el binary.
+### Example: CI Build
 
 ```bash
 cargo run --example ci_build
 ```
 
-### 2. PetClinic CI Pipeline
-**Archivo**: `pipelines/petclinic_ci.rs`
+Output:
+```
+=== CI Build Pipeline ===
 
-Clona el repositorio Spring PetClinic, lo compila y ejecuta tests.
+Pipeline: CI Build Pipeline
+Stages: 4
+  1. Prerequisites (3 steps)
+  2. Build (2 steps)
+  3. Test (2 steps)
+  4. Verify (2 steps)
+
+--- Running Pipeline ---
+--- Results ---
+Success: true
+✅ Pipeline completed successfully!
+```
+
+### Example: PetClinic CI
 
 ```bash
-cargo run --example petclinic_ci
+cargo run --example petclinic
 ```
 
-## Macros Disponibles
+Clona Spring PetClinic, lo compila con Maven y ejecuta tests.
 
-| Macro | Descripción | Ejemplo |
-|-------|-------------|---------|
-| `pipeline! { ... }` | Pipeline completo | `pipeline! { name = "X" stages { ... } }` |
-| `stage!("name") { ... }` | Stage con steps | `stage!("Build") { steps { ... } }` |
-| `steps { ... }` | Bloque de pasos | Dentro de stage |
-| `sh!("cmd")` | Comando shell | `sh!("cargo build")` |
-| `echo!("msg")` | Mensaje | `echo!("Done!")` |
+## 2. Como CLI
 
-## Estructura Completa de Pipeline
+```bash
+# Ejecutar pipeline desde JSON
+pipeliner run --file pipeline.json
+
+# Validar pipeline
+pipeliner validate --file pipeline.json
+
+# Dry-run
+pipeliner run --file pipeline.json --dry-run
+```
+
+## Examples Disponibles
+
+| Example | Descripción |
+|---------|-------------|
+| `ci_build.rs` | Pipeline CI básico: build + test + verify |
+| `petclinic.rs` | Clone + build + test de repositorio Java |
+
+## Uso como Librería
 
 ```rust
-pipeline! {
-    name = "Nombre del Pipeline"
+use pipeliner_core::{Pipeline, PipelineRunner, Stage, Step};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let pipeline = Pipeline::new()
+        .with_name("Mi Pipeline")
+        .with_stage(
+            Stage::new("Build")
+                .with_step(Step::shell("cargo build"))
+                .with_step(Step::echo("Done!"))
+        );
+
+    let mut runner = PipelineRunner::new();
+    let results = runner.run_async(&pipeline).await?;
     
-    stages {
-        stage!("Stage 1") {
-            steps {
-                sh!("comando 1")
-                sh!("comando 2")
-                echo!("Mensaje")
-            }
-        }
-        
-        stage!("Stage 2") {
-            steps {
-                sh!("otro comando")
-            }
-        }
+    if results.success {
+        println!("Pipeline succeeded!");
     }
+    
+    Ok(())
 }
 ```
-
-## Notas
-
-- Los pipelines se definen como código Rust compilado
-- Los macros internos (`sh!`, `echo!`) se expanden dentro del contexto de `pipeline!`
-- El pipeline puede serializarse a JSON para persistencia

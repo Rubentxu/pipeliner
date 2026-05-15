@@ -24,8 +24,11 @@ tokio = { version = "1.35", features = ["full"] }
 # Logging and observability
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 
-# Workspace crate
+# Workspace crates
 pipeliner-cli = { path = "crates/pipeliner-cli" }
+pipeliner-core = { path = "crates/pipeliner-core" }
+pipeliner-macros = { path = "crates/pipeliner-macros" }
+pipeliner-executor = { path = "crates/pipeliner-executor" }
 
 [[bin]]
 name = "pipeliner"
