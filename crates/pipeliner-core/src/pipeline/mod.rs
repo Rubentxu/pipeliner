@@ -1,6 +1,7 @@
 //! Pipeline definition types and builders.
 
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -45,8 +46,8 @@ pub struct Pipeline {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub triggers: Option<Triggers>,
 
-    /// Stages
-    pub stages: Vec<Stage>,
+    /// Stages or Parallel groups
+    pub stages: Vec<StageOrParallel>,
 
     /// Matrix configuration (for parallel execution)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -115,6 +116,209 @@ pub struct Stage {
 
     /// Steps in this stage
     pub steps: Vec<Step>,
+}
+
+/// A stage item that can be either a Stage or a ParallelGroup.
+///
+/// This enum allows stages to be either:
+/// - A regular Stage with sequential steps
+/// - A ParallelGroup containing multiple stages that execute concurrently
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "type")]
+pub enum StageOrParallel {
+    /// A regular stage
+    #[serde(rename = "stage")]
+    Stage(Stage),
+    
+    /// A parallel group containing multiple concurrent stages
+    #[serde(rename = "parallel")]
+    Parallel(ParallelGroup),
+}
+
+impl From<Stage> for StageOrParallel {
+    fn from(stage: Stage) -> Self {
+        StageOrParallel::Stage(stage)
+    }
+}
+
+impl From<ParallelGroup> for StageOrParallel {
+    fn from(group: ParallelGroup) -> Self {
+        StageOrParallel::Parallel(group)
+    }
+}
+
+impl StageOrParallel {
+    /// Returns the name of this item
+    pub fn name(&self) -> Option<&str> {
+        match self {
+            StageOrParallel::Stage(s) => Some(&s.name),
+            StageOrParallel::Parallel(g) => g.name.as_deref(),
+        }
+    }
+    
+    /// Returns true if this is a parallel group
+    pub fn is_parallel(&self) -> bool {
+        matches!(self, StageOrParallel::Parallel(_))
+    }
+    
+    /// Returns true if this is a regular stage
+    pub fn is_stage(&self) -> bool {
+        matches!(self, StageOrParallel::Stage(_))
+    }
+    
+    /// Returns the inner Stage if this is a Stage, None otherwise
+    pub fn as_stage(&self) -> Option<&Stage> {
+        match self {
+            StageOrParallel::Stage(s) => Some(s),
+            StageOrParallel::Parallel(_) => None,
+        }
+    }
+    
+    /// Returns the inner Stage, or a dummy stage with empty steps for Parallel
+    /// Note: Prefer using `as_stage()` and `as_parallel()` explicitly when possible
+    pub fn stage_or_dummy(&self) -> Cow<'_, Stage> {
+        match self {
+            StageOrParallel::Stage(s) => Cow::Borrowed(s),
+            StageOrParallel::Parallel(_) => {
+                // Create a dummy stage for Parallel
+                Cow::Owned(Stage {
+                    name: "parallel".to_string(),
+                    agent: None,
+                    environment: Environment::default(),
+                    options: None,
+                    when: None,
+                    post: None,
+                    steps: Vec::new(),
+                })
+            }
+        }
+    }
+    
+    /// Execute a closure for each stage in this item (recursive for parallel groups)
+    pub fn for_each_stage<F>(&self, mut f: F)
+    where
+        F: FnMut(&Stage, bool) {
+        match self {
+            StageOrParallel::Stage(stage) => f(stage, false),
+            StageOrParallel::Parallel(group) => {
+                for stage in &group.stages {
+                    f(stage, true);
+                }
+            }
+        }
+    }
+    
+    /// Get total step count (recursive for parallel groups)
+    pub fn total_step_count(&self) -> usize {
+        self.all_steps().len()
+    }
+    
+    /// Returns a mutable reference to the inner Stage if this is a Stage
+    /// Panics if this is a Parallel (use `as_parallel_mut()` instead)
+    pub fn as_stage_mut(&mut self) -> Option<&mut Stage> {
+        match self {
+            StageOrParallel::Stage(s) => Some(s),
+            StageOrParallel::Parallel(_) => None,
+        }
+    }
+    
+    /// Returns a mutable reference to the inner ParallelGroup if this is a Parallel
+    pub fn as_parallel_mut(&mut self) -> Option<&mut ParallelGroup> {
+        match self {
+            StageOrParallel::Stage(_) => None,
+            StageOrParallel::Parallel(g) => Some(g),
+        }
+    }
+    
+    /// Returns the inner ParallelGroup if this is a Parallel, None otherwise
+    pub fn as_parallel(&self) -> Option<&ParallelGroup> {
+        match self {
+            StageOrParallel::Stage(_) => None,
+            StageOrParallel::Parallel(g) => Some(g),
+        }
+    }
+    
+    /// Returns all steps in this item (recursive for parallel groups)
+    pub fn all_steps(&self) -> Vec<&Step> {
+        match self {
+            StageOrParallel::Stage(s) => s.steps.iter().collect(),
+            StageOrParallel::Parallel(g) => {
+                g.stages.iter()
+                    .flat_map(|s| s.steps.iter())
+                    .collect()
+            }
+        }
+    }
+    
+    /// Returns the total number of steps (recursive for parallel groups)
+    pub fn step_count(&self) -> usize {
+        self.all_steps().len()
+    }
+}
+
+impl Validate for StageOrParallel {
+    type Error = ValidationError;
+    
+    fn validate(&self) -> Result<(), Self::Error> {
+        match self {
+            StageOrParallel::Stage(stage) => stage.validate(),
+            StageOrParallel::Parallel(group) => {
+                if group.stages.is_empty() {
+                    return Err(ValidationError::EmptyStages);
+                }
+                for stage in &group.stages {
+                    stage.validate()?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+/// A group of stages that execute in parallel.
+///
+/// All stages in a ParallelGroup run concurrently. The group succeeds
+/// if all stages succeed (unless fail_fast is enabled).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParallelGroup {
+    /// Optional name for the parallel group
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    
+    /// Stages to execute in parallel
+    pub stages: Vec<Stage>,
+    
+    /// Fail fast - stop other stages when one fails
+    #[serde(default = "default_parallel_fail_fast")]
+    pub fail_fast: bool,
+}
+
+fn default_parallel_fail_fast() -> bool {
+    false
+}
+
+impl ParallelGroup {
+    /// Creates a new parallel group with the given stages
+    pub fn new(stages: Vec<Stage>) -> Self {
+        Self {
+            name: None,
+            stages,
+            fail_fast: false,
+        }
+    }
+    
+    /// Sets the name of the parallel group
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into());
+        self
+    }
+    
+    /// Enables fail_fast mode
+    pub fn with_fail_fast(mut self) -> Self {
+        self.fail_fast = true;
+        self
+    }
 }
 
 /// Stage-specific options
@@ -725,11 +929,23 @@ impl Pipeline {
         self
     }
 
-    /// Adds a stage
+    /// Adds a stage or parallel group
     #[must_use]
-    pub fn with_stage(mut self, stage: Stage) -> Self {
-        self.stages.push(stage);
+    pub fn with_stage(mut self, stage: impl Into<StageOrParallel>) -> Self {
+        self.stages.push(stage.into());
         self
+    }
+    
+    /// Adds a parallel group
+    #[must_use]
+    pub fn with_parallel(mut self, parallel: ParallelGroup) -> Self {
+        self.stages.push(StageOrParallel::Parallel(parallel));
+        self
+    }
+    
+    /// Creates a parallel group with stages
+    pub fn parallel(stages: Vec<Stage>) -> ParallelGroup {
+        ParallelGroup::new(stages)
     }
 
     /// Sets the matrix configuration
@@ -746,44 +962,76 @@ impl Pipeline {
     #[must_use]
     pub fn structure(&self) -> PipelineStructure {
         PipelineStructure {
-            stages: self.stages.iter().map(|stage| {
-                let has_matrix = stage.options.as_ref().and_then(|o| o.retry).is_some()
-                    || self.matrix.is_some();
-                StageStructure {
-                    name: stage.name.clone(),
-                    steps: stage.steps.iter().map(|step| StepStructure {
-                        name: step.name.clone(),
-                        step_type: match &step.step_type {
-                            StepType::Shell { .. } => "shell",
-                            StepType::Echo { .. } => "echo",
-                            StepType::Retry { .. } => "retry",
-                            StepType::Timeout { .. } => "timeout",
-                            StepType::Stash { .. } => "stash",
-                            StepType::Unstash { .. } => "unstash",
-                            StepType::Input { .. } => "input",
-                            StepType::Dir { .. } => "dir",
-                            StepType::Script { .. } => "script",
-                            StepType::Archive { .. } => "archive",
-                            StepType::Custom { .. } => "custom",
-                            StepType::Log { .. } => "log",
-                            StepType::When { .. } => "when",
-                            StepType::ErrorHandler { .. } => "error_handler",
-                            StepType::Is { .. } => "is",
-                            StepType::WithCredentials { .. } => "with_credentials",
-                            StepType::Checkout { .. } => "checkout",
-                            StepType::Agent { .. } => "agent",
+            stages: self.stages.iter().map(|stage_or_parallel| {
+                let stage_structure = match stage_or_parallel {
+                    StageOrParallel::Stage(stage) => {
+                        let has_matrix = stage.options.as_ref().and_then(|o| o.retry).is_some()
+                            || self.matrix.is_some();
+                        StageStructure {
+                            name: stage.name.clone(),
+                            steps: stage.steps.iter().map(|step| StepStructure {
+                                name: step.name.clone(),
+                                step_type: match &step.step_type {
+                                    StepType::Shell { .. } => "shell",
+                                    StepType::Echo { .. } => "echo",
+                                    StepType::Retry { .. } => "retry",
+                                    StepType::Timeout { .. } => "timeout",
+                                    StepType::Stash { .. } => "stash",
+                                    StepType::Unstash { .. } => "unstash",
+                                    StepType::Input { .. } => "input",
+                                    StepType::Dir { .. } => "dir",
+                                    StepType::Script { .. } => "script",
+                                    StepType::Archive { .. } => "archive",
+                                    StepType::Custom { .. } => "custom",
+                                    StepType::Log { .. } => "log",
+                                    StepType::When { .. } => "when",
+                                    StepType::ErrorHandler { .. } => "error_handler",
+                                    StepType::Is { .. } => "is",
+                                    StepType::WithCredentials { .. } => "with_credentials",
+                                    StepType::Checkout { .. } => "checkout",
+                                    StepType::Agent { .. } => "agent",
+                                }
+                                .to_string(),
+                                command: match &step.step_type {
+                                    StepType::Shell { command } => Some(command.clone()),
+                                    StepType::Script { content } => Some(content.clone()),
+                                    _ => None,
+                                },
+                            }).collect(),
+                            has_parallel: false,
+                            has_matrix,
+                            when_condition: stage.when.as_ref().map(|w| format!("{:?}", w)),
                         }
-                        .to_string(),
-                        command: match &step.step_type {
-                            StepType::Shell { command } => Some(command.clone()),
-                            StepType::Script { content } => Some(content.clone()),
-                            _ => None,
-                        },
-                    }).collect(),
-                    has_parallel: false,
-                    has_matrix,
-                    when_condition: stage.when.as_ref().map(|w| format!("{:?}", w)),
-                }
+                    }
+                    StageOrParallel::Parallel(group) => {
+                        // For parallel groups, create a synthetic structure
+                        // Note: true parallel visualization needs flattening in the UI
+                        let name = group.name.clone().unwrap_or_else(|| "parallel".to_string());
+                        let has_matrix = self.matrix.is_some();
+                        
+                        // Collect all steps from all parallel stages
+                        let steps: Vec<_> = group.stages.iter()
+                            .flat_map(|stage| stage.steps.iter().map(|step| StepStructure {
+                                name: Some(format!("{}: {}", stage.name, step.name.clone().unwrap_or_default())),
+                                step_type: match &step.step_type {
+                                    StepType::Shell { .. } => "shell",
+                                    StepType::Echo { .. } => "echo",
+                                    _ => "other",
+                                }.to_string(),
+                                command: None,
+                            }))
+                            .collect();
+                        
+                        StageStructure {
+                            name,
+                            steps,
+                            has_parallel: true,
+                            has_matrix,
+                            when_condition: None,
+                        }
+                    }
+                };
+                stage_structure
             }).collect(),
         }
     }

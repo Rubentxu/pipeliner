@@ -276,8 +276,8 @@ impl PipelineRuntime {
         self.phase_log.push(phase_result);
 
         let total_duration = self.start_time.map(|s| s.elapsed().as_millis() as u64).unwrap_or(0);
-        let step_count: usize = pipeline.stages.iter().map(|s| s.steps.len()).sum();
-
+        let step_count: usize = pipeline.stages.iter().map(|s| s.step_count()).sum();
+        
         Ok(PipelineRunResult::success(
             pipeline.stages.len(),
             step_count,
@@ -342,7 +342,7 @@ impl PipelineRuntime {
             }
             LifecyclePhase::BindSteps => {
                 // BindSteps phase: bind step references and resolve variables
-                let step_count: usize = pipeline.stages.iter().map(|s| s.steps.len()).sum();
+                let step_count: usize = pipeline.stages.iter().map(|s| s.step_count()).sum();
                 Ok(Some(format!("bound {} steps", step_count)))
             }
             LifecyclePhase::Execute => {

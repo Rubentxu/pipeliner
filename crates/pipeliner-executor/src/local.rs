@@ -5,7 +5,10 @@
 
 use pipeliner_core::logging::LogLevel;
 use pipeliner_core::registry::StepRegistry;
-use pipeliner_core::{Pipeline, Step, StepFactory, StepType, Validate};
+use pipeliner_core::{
+    pipeline::Stage,
+    Pipeline, Step, StepFactory, StepType, Validate,
+};
 use pipeliner_events::markers::{StageMarkerEmitter, StageMarkerParser, STAGE_MARKER_PREFIX};
 use pipeliner_events::types::markers::{StageMarker, StageResult};
 
@@ -491,86 +494,96 @@ impl LocalExecutor {
         // Create execution report
         let mut report = ExecutionReport::new(pipeline_name);
 
-        for (stage_idx, stage) in pipeline.stages.iter().enumerate() {
-            // Check if stage is filtered (skipped)
-            let is_skipped = !self.stages.is_empty() && !self.stages.contains(&stage.name);
-
-            if is_skipped {
-                debug!("[SKIP] Stage '{}' not in filter list", stage.name);
-                // Add skipped stage to report
-                report.add_stage(StageReport::skipped(&stage.name));
-                continue;
-            }
-
+        for (stage_idx, stage_or_parallel) in pipeline.stages.iter().enumerate() {
+            // Execute this stage or parallel group
             let stage_start = Instant::now();
+            let stage_name = stage_or_parallel.name().unwrap_or("unnamed").to_string();
+            let is_parallel = stage_or_parallel.is_parallel();
 
-            // Emit STARTED marker
-            self.emit_started_marker(&stage.name);
+            // For parallel groups, get all stages
+            let stages_to_execute: Vec<&Stage> = if is_parallel {
+                stage_or_parallel.as_parallel()
+                    .map(|g| g.stages.iter().collect())
+                    .unwrap_or_default()
+            } else {
+                stage_or_parallel.as_stage()
+                    .map(|s| vec![s])
+                    .unwrap_or_default()
+            };
 
-            // Update context for observers
-            let stage_ctx = self.context.borrow().for_stage(&stage.name);
+            for stage in stages_to_execute {
+                let stage_name = &stage.name;
 
-            // Notify observers of stage start
-            self.notify_observers(|obs| obs.on_stage_start(&stage_ctx));
+                // Check if stage is filtered (skipped)
+                let is_skipped = !self.stages.is_empty() && !self.stages.contains(stage_name);
 
-            // Print stage start using formatter
-            println!(
-                "{}",
-                self.formatter.format_stage_start(
-                    &stage.name,
-                    stage_idx + 1,
-                    pipeline.stages.len()
-                )
-            );
-
-            // Create stage report
-            let mut stage_report = StageReport::new(&stage.name);
-            let mut stage_success = true;
-
-            for (_step_idx, step) in stage.steps.iter().enumerate() {
-                // Update context for observers
-                let step_name = step.name.clone().unwrap_or_else(|| "unnamed".to_string());
-                let step_ctx = stage_ctx.for_step(&step_name);
-
-                // Notify observers of step start
-                self.notify_observers(|obs| obs.on_step_start(&step_ctx));
-
-                let result = self.execute_step(step, min_level).await;
-                results.push(result.clone());
-
-                // Add step to stage report
-                let step_report = StepReport::from_local_result(&result);
-                stage_report.add_step(step_report);
-
-                // Notify observers of step completion
-                self.notify_observers(|obs| {
-                    obs.on_step_complete(&step_ctx, Duration::from_millis(result.duration_ms), result.success)
-                });
-
-                if !result.success {
-                    warn!("Pipeline aborted due to step failure");
-                    stage_success = false;
-                    // Emit ERROR marker for stage failure
-                    self.emit_error_marker(&stage.name, "Stage failed due to step failure");
-                    break;
+                if is_skipped {
+                    debug!("[SKIP] Stage '{}' not in filter list", stage_name);
+                    report.add_stage(StageReport::skipped(stage_name));
+                    continue;
                 }
+
+                let step_start = Instant::now();
+
+                // Emit STARTED marker
+                self.emit_started_marker(stage_name);
+
+                // Update context for observers
+                let stage_ctx = self.context.borrow().for_stage(stage_name);
+
+                // Notify observers of stage start
+                self.notify_observers(|obs| obs.on_stage_start(&stage_ctx));
+
+                // Print stage start using formatter
+                println!(
+                    "{}",
+                    self.formatter.format_stage_start(
+                        stage_name,
+                        stage_idx + 1,
+                        pipeline.stages.len()
+                    )
+                );
+
+                // Create stage report
+                let mut stage_report = StageReport::new(stage_name);
+                let mut stage_success = true;
+
+                for (_step_idx, step) in stage.steps.iter().enumerate() {
+                    let step_name = step.name.clone().unwrap_or_else(|| "unnamed".to_string());
+                    let step_ctx = stage_ctx.for_step(&step_name);
+
+                    self.notify_observers(|obs| obs.on_step_start(&step_ctx));
+
+                    let result = self.execute_step(step, min_level).await;
+                    results.push(result.clone());
+
+                    let step_report = StepReport::from_local_result(&result);
+                    stage_report.add_step(step_report);
+
+                    self.notify_observers(|obs| {
+                        obs.on_step_complete(&step_ctx, Duration::from_millis(result.duration_ms), result.success)
+                    });
+
+                    if !result.success {
+                        warn!("Pipeline aborted due to step failure");
+                        stage_success = false;
+                        self.emit_error_marker(stage_name, "Stage failed due to step failure");
+                        break;
+                    }
+                }
+
+                let step_duration = step_start.elapsed();
+
+                if stage_success {
+                    let duration_ms = step_duration.as_millis() as u64;
+                    self.emit_completed_marker(stage_name, duration_ms, StageResult::Success);
+                    self.notify_observers(|obs| obs.on_stage_complete(&stage_ctx, step_duration, true));
+                }
+
+                stage_report.duration_ms = step_duration.as_millis() as u64;
+                stage_report.success = stage_success;
+                report.add_stage(stage_report);
             }
-
-            let stage_duration = stage_start.elapsed();
-
-            if stage_success {
-                let duration_ms = stage_duration.as_millis() as u64;
-                // Emit COMPLETED marker with SUCCESS result
-                self.emit_completed_marker(&stage.name, duration_ms, StageResult::Success);
-
-                // Notify observers of stage completion
-                self.notify_observers(|obs| obs.on_stage_complete(&stage_ctx, stage_duration, true));
-            }
-
-            // Update stage report with duration and add to execution report
-            stage_report.duration_ms = stage_duration.as_millis() as u64;
-            stage_report.success = stage_success;
-            report.add_stage(stage_report);
         }
 
         let total_ms = overall_start.elapsed().as_millis() as u64;
@@ -620,22 +633,31 @@ impl LocalExecutor {
         }
 
         println!("[DRY-RUN] Would execute {} stages:", pipeline.stages.len());
-
-        for stage in &pipeline.stages {
-            // Check if stage would be filtered
-            if !self.stages.is_empty() && !self.stages.contains(&stage.name) {
-                println!("[DRY-RUN]   [SKIP] {}", stage.name);
-                continue;
-            }
-
-            println!("[DRY-RUN]   Stage: {}", stage.name);
-            for step in &stage.steps {
-                let step_name = step.name.clone().unwrap_or_else(|| "unnamed".to_string());
-                let step_type = format!("{:?}", step.step_type);
-                println!(
-                    "{}",
-                    self.formatter.format_dry_run_step(&stage.name, &step_name, &step_type)
-                );
+        
+        for stage_or_parallel in &pipeline.stages {
+            // For parallel, execute all stages
+            let stages: Vec<&Stage> = match stage_or_parallel {
+                pipeliner_core::pipeline::StageOrParallel::Stage(s) => vec![s],
+                pipeliner_core::pipeline::StageOrParallel::Parallel(g) => g.stages.iter().collect(),
+            };
+            
+            for stage in stages {
+                let stage_name = &stage.name;
+                // Check if stage would be filtered
+                if !self.stages.is_empty() && !self.stages.contains(stage_name) {
+                    println!("[DRY-RUN]   [SKIP] {}", stage_name);
+                    continue;
+                }
+                
+                println!("[DRY-RUN]   Stage: {}", stage_name);
+                for step in &stage.steps {
+                    let step_name = step.name.clone().unwrap_or_else(|| "unnamed".to_string());
+                    let step_type = format!("{:?}", step.step_type);
+                    println!(
+                        "{}",
+                        self.formatter.format_dry_run_step(stage_name, &step_name, &step_type)
+                    );
+                }
             }
         }
 

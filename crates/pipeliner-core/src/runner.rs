@@ -250,42 +250,79 @@ impl PipelineRunner {
         let mut steps_executed = 0;
         let mut all_success = true;
 
-        for stage in &pipeline.stages {
-            let stage_start = Instant::now();
-            let stage_name = &stage.name;
+        for stage_or_parallel in &pipeline.stages {
+            match stage_or_parallel {
+                crate::pipeline::StageOrParallel::Stage(stage) => {
+                    let stage_start = Instant::now();
+                    let stage_name = &stage.name;
 
-            // Fire stage start callback
-            if let Some(ref callback) = self.on_stage_start {
-                callback(stage_name);
-            }
+                    // Fire stage start callback
+                    if let Some(ref callback) = self.on_stage_start {
+                        callback(stage_name);
+                    }
 
-            info!("[Stage] {}", stage_name);
-            info!("----------------------------------------");
+                    info!("[Stage] {}", stage_name);
+                    info!("----------------------------------------");
 
-            let mut stage_success = true;
-            for step in &stage.steps {
-                // Fire step start callback
-                let step_name = step.name.as_deref().unwrap_or("unnamed");
-                if let Some(ref callback) = self.on_step_start {
-                    callback(step_name);
+                    let mut stage_success = true;
+                    for step in &stage.steps {
+                        // Fire step start callback
+                        let step_name = step.name.as_deref().unwrap_or("unnamed");
+                        if let Some(ref callback) = self.on_step_start {
+                            callback(step_name);
+                        }
+
+                        // TODO: Execute step via executor (currently just tracking)
+                        debug!("[Step] {} (type: {:?})", step_name, step.step_type);
+                        steps_executed += 1;
+                    }
+
+                    if stage_success {
+                        let duration_ms = stage_start.elapsed().as_millis() as u64;
+                        // Fire stage complete callback
+                        if let Some(ref callback) = self.on_stage_complete {
+                            callback(stage_name, duration_ms);
+                        }
+                    } else {
+                        all_success = false;
+                    }
+
+                    stages_executed += 1;
                 }
+                crate::pipeline::StageOrParallel::Parallel(group) => {
+                    let group_name = group.name.as_deref().unwrap_or("parallel");
+                    info!("[Parallel] {}", group_name);
+                    info!("----------------------------------------");
+                    
+                    // Execute stages in parallel (sequential for now, true parallelism needs executor)
+                    for stage in &group.stages {
+                        let stage_start = Instant::now();
+                        let stage_name = &stage.name;
 
-                // TODO: Execute step via executor (currently just tracking)
-                debug!("[Step] {} (type: {:?})", step_name, step.step_type);
-                steps_executed += 1;
-            }
+                        if let Some(ref callback) = self.on_stage_start {
+                            callback(stage_name);
+                        }
 
-            if stage_success {
-                let duration_ms = stage_start.elapsed().as_millis() as u64;
-                // Fire stage complete callback
-                if let Some(ref callback) = self.on_stage_complete {
-                    callback(stage_name, duration_ms);
+                        info!("[Parallel Stage] {}", stage_name);
+
+                        for step in &stage.steps {
+                            let step_name = step.name.as_deref().unwrap_or("unnamed");
+                            if let Some(ref callback) = self.on_step_start {
+                                callback(step_name);
+                            }
+                            debug!("[Step] {} (type: {:?})", step_name, step.step_type);
+                            steps_executed += 1;
+                        }
+
+                        let duration_ms = stage_start.elapsed().as_millis() as u64;
+                        if let Some(ref callback) = self.on_stage_complete {
+                            callback(stage_name, duration_ms);
+                        }
+
+                        stages_executed += 1;
+                    }
                 }
-            } else {
-                all_success = false;
             }
-
-            stages_executed += 1;
         }
 
         let total_duration = start.elapsed().as_millis() as u64;
