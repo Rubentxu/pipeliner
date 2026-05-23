@@ -12,18 +12,21 @@ const VALID_PIPELINE: &str = r#"{
     "name": "test-pipeline",
     "stages": [
         {
+            "type": "stage",
             "name": "build",
             "steps": [
                 {"type": "echo", "name": "echo-build", "message": "Building"}
             ]
         },
         {
+            "type": "stage",
             "name": "test",
             "steps": [
                 {"type": "echo", "name": "echo-test", "message": "Testing"}
             ]
         },
         {
+            "type": "stage",
             "name": "deploy",
             "steps": [
                 {"type": "echo", "name": "echo-deploy", "message": "Deploying"}
@@ -39,7 +42,7 @@ fn test_dry_run_flag() {
 
     Command::cargo_bin("pipeliner-cli")
         .unwrap()
-        .args(["run", "--file", path.to_str().unwrap(), "--dry-run"])
+        .args(["run", path.to_str().unwrap(), "--dry-run"])
         .assert()
         .success()
         .stdout(predicates::str::contains("[DRY-RUN]"));
@@ -52,7 +55,7 @@ fn test_stages_flag() {
 
     Command::cargo_bin("pipeliner-cli")
         .unwrap()
-        .args(["run", "--file", path.to_str().unwrap(), "--stages=build,test"])
+        .args(["run", path.to_str().unwrap(), "--stages=build,test"])
         .assert()
         .success();
 }
@@ -64,7 +67,7 @@ fn test_output_json_flag() {
 
     Command::cargo_bin("pipeliner-cli")
         .unwrap()
-        .args(["run", "--file", path.to_str().unwrap(), "--output=json"])
+        .args(["--format", "json", "run", path.to_str().unwrap()])
         .assert()
         .success()
         .stdout(predicates::str::contains("pipeline_start"));

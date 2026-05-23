@@ -19,11 +19,13 @@
 //! let binary_path = compiler.compile(script_content, &manifest, Path::new("script.rs")).await?;
 //! ```
 
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use tokio::process::Command;
 
 use crate::manifest::Manifest;
+use pipeliner_core::spec::step_spec::{InterpolationMode, ShellKind, ShellStepSpec};
 
 /// Result of a successful compilation.
 #[derive(Debug, Clone)]
@@ -34,6 +36,31 @@ pub struct CompilationOutput {
     pub project_dir: PathBuf,
     /// Compilation time in seconds
     pub compile_time_secs: f64,
+}
+
+/// Result of shell script generation.
+#[derive(Debug)]
+pub struct GeneratedShellScript {
+    /// Path to the generated script
+    pub script_path: PathBuf,
+    /// Temporary directory containing the script (kept alive to persist the script)
+    temp_dir: tempfile::TempDir,
+    /// The shell kind used
+    pub shell_kind: ShellKind,
+}
+
+impl GeneratedShellScript {
+    /// Returns the path to the script.
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        &self.script_path
+    }
+
+    /// Returns the shell kind.
+    #[must_use]
+    pub fn shell(&self) -> ShellKind {
+        self.shell_kind
+    }
 }
 
 /// Script compiler for Rust scripts.
@@ -136,7 +163,7 @@ impl ScriptCompiler {
 
         let final_binary = tempfile::tempdir_in(&binary_store_dir)
         .map_err(|e| CompilerError::TempDirError(e.to_string()))?
-        .into_path();
+        .keep();
         let final_binary = final_binary.join("script");
 
         std::fs::copy(&binary_path, &final_binary)
@@ -160,6 +187,117 @@ impl ScriptCompiler {
     ) -> Result<PathBuf, CompilerError> {
         let output = self.compile(script_content, manifest, script_path).await?;
         Ok(output.binary_path)
+    }
+
+    /// Generates a shell script from a ShellStepSpec with template substitution.
+    ///
+    /// # Arguments
+    ///
+    /// * `step` - The shell step specification
+    /// * `workdir` - Optional working directory for the script
+    ///
+    /// # Errors
+    ///
+    /// Returns `CompilerError` if script generation fails.
+    pub fn generate_shell_script(
+        &self,
+        step: &ShellStepSpec,
+    ) -> Result<GeneratedShellScript, CompilerError> {
+        let script_content = match step.interpolation {
+            InterpolationMode::Pipeliner => {
+                Self::interpolate_variables(&step.script)
+            }
+            InterpolationMode::Raw => step.script.clone(),
+        };
+
+        let extension = match step.kind {
+            ShellKind::Sh => "sh",
+            ShellKind::PowerShell => "ps1",
+            ShellKind::Cmd => "bat",
+        };
+
+        let shebang = match step.kind {
+            ShellKind::Sh => Some("#!/bin/sh"),
+            ShellKind::PowerShell => Some("#!/usr/bin/env pwsh"),
+            ShellKind::Cmd => None,
+        };
+
+        let temp_dir = tempfile::tempdir()
+            .map_err(|e| CompilerError::TempDirError(e.to_string()))?;
+        let script_path = temp_dir.path().join(format!("script.{}", extension));
+
+        let final_content = if let Some(shebang) = shebang {
+            format!("{}\n{}", shebang, script_content)
+        } else {
+            script_content.to_string()
+        };
+
+        fs::write(&script_path, &final_content)
+            .map_err(|e| CompilerError::IoError(format!("Failed to write script: {}", e)))?;
+
+        // Make executable on Unix
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(mut perms) = fs::metadata(&script_path).map(|m| m.permissions()) {
+                perms.set_mode(0o755);
+                let _ = fs::set_permissions(&script_path, perms);
+            }
+        }
+
+        Ok(GeneratedShellScript {
+            script_path,
+            temp_dir,
+            shell_kind: step.kind,
+        })
+    }
+
+    /// Applies variable interpolation to a script.
+    ///
+    /// Replaces `${VAR}` and `$VAR` patterns with environment variable values.
+    /// If a variable is not set, it is replaced with an empty string.
+    fn interpolate_variables(script: &str) -> String {
+        let mut result = String::with_capacity(script.len());
+        let mut chars = script.chars().peekable();
+
+        while let Some(c) = chars.next() {
+            if c == '$' {
+                match chars.peek() {
+                    Some('{') => {
+                        chars.next(); // consume '{'
+                        let mut var_name = String::new();
+                        while let Some(c) = chars.next() {
+                            if c == '}' {
+                                break;
+                            }
+                            var_name.push(c);
+                        }
+                        let value = std::env::var(&var_name).unwrap_or_default();
+                        result.push_str(&value);
+                    }
+                    Some(c2) if c2.is_alphanumeric() || *c2 == '_' => {
+                        let mut var_name = String::new();
+                        while let Some(&c2) = chars.peek() {
+                            if c2.is_alphanumeric() || c2 == '_' {
+                                var_name.push(c2);
+                                chars.next();
+                            } else {
+                                break;
+                            }
+                        }
+                        let value = std::env::var(&var_name).unwrap_or_default();
+                        result.push_str(&value);
+                    }
+                    _ => {
+                        result.push(c);
+                    }
+                }
+            } else {
+                result.push(c);
+            }
+        }
+
+        result
     }
 
     // =====================================================================
@@ -461,5 +599,130 @@ fn main() {
             // Expected to fail in test environment - that's OK
             println!("Compilation test skipped (expected in CI): {}", e);
         }
+    }
+
+    #[test]
+    fn test_generate_shell_script_sh() {
+        let compiler = ScriptCompiler::new();
+        let step = ShellStepSpec::new("echo hello");
+        let result = compiler.generate_shell_script(&step);
+
+        assert!(result.is_ok());
+        let script = result.unwrap();
+        assert_eq!(script.shell(), ShellKind::Sh);
+        assert!(script.path().to_string_lossy().ends_with(".sh"));
+    }
+
+    #[test]
+    fn test_generate_shell_script_powershell() {
+        let compiler = ScriptCompiler::new();
+        let step = ShellStepSpec::new("echo hello").with_kind(ShellKind::PowerShell);
+        let result = compiler.generate_shell_script(&step);
+
+        assert!(result.is_ok());
+        let script = result.unwrap();
+        assert_eq!(script.shell(), ShellKind::PowerShell);
+        assert!(script.path().to_string_lossy().ends_with(".ps1"));
+    }
+
+    #[test]
+    fn test_generate_shell_script_cmd() {
+        let compiler = ScriptCompiler::new();
+        let step = ShellStepSpec::new("echo hello").with_kind(ShellKind::Cmd);
+        let result = compiler.generate_shell_script(&step);
+
+        assert!(result.is_ok());
+        let script = result.unwrap();
+        assert_eq!(script.shell(), ShellKind::Cmd);
+        assert!(script.path().to_string_lossy().ends_with(".bat"));
+    }
+
+    #[test]
+    fn test_generate_shell_script_raw_mode() {
+        let compiler = ScriptCompiler::new();
+        let step = ShellStepSpec::new("echo $HOME").with_interpolation(InterpolationMode::Raw);
+        let result = compiler.generate_shell_script(&step);
+
+        assert!(result.is_ok());
+        let script = result.unwrap();
+        // In raw mode, $HOME should NOT be expanded
+        let content = std::fs::read_to_string(script.path()).unwrap();
+        assert!(content.contains("$HOME"));
+    }
+
+    #[test]
+    fn test_generate_shell_script_pipeliner_mode() {
+        // Set an environment variable for the test
+        // SAFETY: These tests run in isolation and we're only setting vars in this process
+        unsafe {
+            std::env::set_var("TEST_VAR", "test_value");
+        }
+        let compiler = ScriptCompiler::new();
+        let step = ShellStepSpec::new("echo $TEST_VAR").with_interpolation(InterpolationMode::Pipeliner);
+        let result = compiler.generate_shell_script(&step);
+
+        assert!(result.is_ok());
+        let script = result.unwrap();
+        // In pipeliner mode, $TEST_VAR should be expanded
+        let content = std::fs::read_to_string(script.path()).unwrap();
+        assert!(content.contains("test_value"));
+    }
+
+    #[test]
+    fn test_generate_shell_script_with_braces() {
+        // SAFETY: These tests run in isolation
+        unsafe {
+            std::env::set_var("OUTER_VAR", "outer_value");
+        }
+        let compiler = ScriptCompiler::new();
+        let step = ShellStepSpec::new("echo ${OUTER_VAR}").with_interpolation(InterpolationMode::Pipeliner);
+        let result = compiler.generate_shell_script(&step);
+
+        assert!(result.is_ok());
+        let script = result.unwrap();
+        let content = std::fs::read_to_string(script.path()).unwrap();
+        assert!(content.contains("outer_value"));
+    }
+
+    #[test]
+    fn test_interpolate_variables_simple() {
+        // SAFETY: These tests run in isolation
+        unsafe {
+            std::env::set_var("SIMPLE_VAR", "simple");
+        }
+        let result = ScriptCompiler::interpolate_variables("echo $SIMPLE_VAR");
+        assert_eq!(result, "echo simple");
+    }
+
+    #[test]
+    fn test_interpolate_variables_braces() {
+        // SAFETY: These tests run in isolation
+        unsafe {
+            std::env::set_var("BRACED_VAR", "braced");
+        }
+        let result = ScriptCompiler::interpolate_variables("echo ${BRACED_VAR}");
+        assert_eq!(result, "echo braced");
+    }
+
+    #[test]
+    fn test_interpolate_variables_unset() {
+        // Make sure UNSET_VAR is not set
+        // SAFETY: These tests run in isolation
+        unsafe {
+            std::env::remove_var("UNSET_VAR_FOR_TEST");
+        }
+        let result = ScriptCompiler::interpolate_variables("echo $UNSET_VAR_FOR_TEST");
+        assert_eq!(result, "echo ");
+    }
+
+    #[test]
+    fn test_interpolate_variables_mixed() {
+        // SAFETY: These tests run in isolation
+        unsafe {
+            std::env::set_var("VAR_A", "a");
+            std::env::set_var("VAR_B", "b");
+        }
+        let result = ScriptCompiler::interpolate_variables("start $VAR_A mid $VAR_B end");
+        assert_eq!(result, "start a mid b end");
     }
 }

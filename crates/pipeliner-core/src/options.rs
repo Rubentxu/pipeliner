@@ -38,6 +38,9 @@ pub struct PipelineOptions {
     /// Log level for pipeline execution
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub log_level: Option<LogLevel>,
+    /// Fail fast - stop all stages when any stage fails (default true)
+    #[serde(default)]
+    pub fail_fast: bool,
 }
 
 /// Timeout configuration
@@ -257,6 +260,13 @@ impl PipelineOptions {
     #[must_use]
     pub fn block_upstream(mut self) -> Self {
         self.block_upstream = true;
+        self
+    }
+
+    /// Sets fail_fast behavior
+    #[must_use]
+    pub fn with_fail_fast(mut self, fail_fast: bool) -> Self {
+        self.fail_fast = fail_fast;
         self
     }
 }

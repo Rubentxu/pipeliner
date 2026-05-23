@@ -95,7 +95,7 @@ impl ScriptCache {
         })
     }
 
-    /// Creates a cache in the default location (~/.cache/pipeliner-script).
+    /// Creates a cache in the default location (~/.pipeliner/cache).
     ///
     /// # Errors
     ///
@@ -103,7 +103,8 @@ impl ScriptCache {
     pub fn with_default_location() -> Result<Self, CacheError> {
         let cache_dir = dirs::cache_dir()
             .unwrap_or_else(|| PathBuf::from(".cache"))
-            .join("pipeliner-script");
+            .join("pipeliner")
+            .join("cache");
         Self::new(cache_dir)
     }
 

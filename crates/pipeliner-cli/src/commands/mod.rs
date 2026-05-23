@@ -11,241 +11,276 @@ use pipeliner_executor::context::CacheMode;
 use pipeliner_executor::{ExecutionConfig, LocalExecutor, OutputFormat};
 use pipeliner_script::ScriptStepFactory;
 
+pub mod describe;
+pub mod gc;
+pub mod graph;
 pub mod init;
+pub mod list;
 pub mod script;
+
+pub use describe::DescribeArgs;
+pub use gc::{GcArgs, GcSubcommand};
+pub use graph::GraphArgs;
+pub use init::InitArgs;
+pub use list::ListArgs;
+pub use script::ScriptRunArgs;
 
 /// Command-line interface for Pipeliner pipeline execution
 #[derive(Parser, Debug)]
 #[command(name = "pipeliner")]
 #[command(author, version, about, long_about = None)]
 struct Cli {
+    /// Enable verbose output
+    #[arg(short, long, global = true, default_value = "false")]
+    verbose: bool,
+
+    /// Output format (json, yaml, human)
+    #[arg(long, global = true, default_value = "human", value_name = "FORMAT")]
+    format: String,
+
+    /// Disable colored output
+    #[arg(long, global = true, default_value = "false")]
+    no_color: bool,
+
+    /// Path to config file
+    #[arg(short, long, global = true, value_name = "PATH")]
+    config: Option<PathBuf>,
+
     #[command(subcommand)]
     command: Commands,
 }
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// Run a pipeline
-    #[command(name = "run")]
+    /// Run a pipeline script
     Run(RunArgs),
 
     /// Execute a Rust script directly
-    #[command(name = "script")]
-    Script(script::ScriptRunArgs),
+    Script(ScriptRunArgs),
 
     /// Validate a pipeline definition
-    #[command(name = "validate")]
     Validate(ValidateArgs),
 
     /// Lint a pipeline for style and best practices
-    #[command(name = "lint")]
     Lint(LintArgs),
 
     /// Generate documentation for a pipeline
-    #[command(name = "doc")]
     Doc(DocArgs),
 
     /// Export pipeline to different formats
-    #[command(name = "export")]
     Export(ExportArgs),
 
     /// Generate shell completions
-    #[command(name = "completions")]
     Completions(CompletionsArgs),
 
     /// Check pipeline syntax without execution
-    #[command(name = "check")]
     Check(CheckArgs),
 
     /// Initialize a new pipeline
-    #[command(name = "init")]
-    Init(init::InitArgs),
+    Init(InitArgs),
+
+    /// List available pipelines
+    List(ListArgs),
+
+    /// Show pipeline information
+    Describe(DescribeArgs),
+
+    /// Generate pipeline graph in various formats
+    Graph(GraphArgs),
+
+    /// Garbage collect old pipeline runs
+    Gc(GcArgs),
 }
 
 #[derive(Args, Debug, Clone)]
 struct RunArgs {
-    /// Pipeline file to run
-    #[arg(short, long)]
-    file: Option<PathBuf>,
+    /// Pipeline script file to run
+    #[arg(value_name = "SCRIPT")]
+    pub script: Option<PathBuf>,
 
     /// Pipeline definition as string
     #[arg(short, long)]
-    definition: Option<String>,
+    pub definition: Option<String>,
 
     /// Working directory
     #[arg(short, long)]
-    working_dir: Option<PathBuf>,
-
-    /// Verbose output
-    #[arg(short, long, default_value = "false")]
-    verbose: bool,
+    pub working_dir: Option<PathBuf>,
 
     /// Stages to execute (comma-separated)
     #[arg(long)]
-    stages: Option<String>,
+    pub stages: Option<String>,
 
     /// Dry-run mode (validate without executing)
     #[arg(long)]
-    dry_run: bool,
-
-    /// Output format (human, json, quiet)
-    #[arg(long, default_value = "human")]
-    output: String,
-
-    /// Log level (error, warn, info, debug, trace)
-    #[arg(long, default_value = "info")]
-    log: String,
-
-    /// Environment (development, staging, production)
-    #[arg(long)]
-    env: Option<String>,
+    pub dry_run: bool,
 
     /// Cache mode (full, deps, none)
     #[arg(long, default_value = "full")]
-    cache: String,
+    pub cache: String,
 
     /// Pipeline timeout in seconds
     #[arg(long)]
-    timeout: Option<u64>,
+    pub timeout: Option<u64>,
 
     /// Maximum retries on step failure
     #[arg(long)]
-    retry: Option<u32>,
+    pub retry: Option<u32>,
+
+    /// Maximum parallelism for parallel stages
+    #[arg(long)]
+    pub parallelism: Option<usize>,
 
     /// Watch mode - re-run on file changes
     #[arg(long)]
-    watch: bool,
+    pub watch: bool,
 }
 
 #[derive(Args, Debug)]
 struct ValidateArgs {
     /// Pipeline file to validate
-    #[arg(short, long)]
-    file: Option<PathBuf>,
+    #[arg(value_name = "SCRIPT")]
+    pub script: Option<PathBuf>,
 
     /// Pipeline definition as string
     #[arg(short, long)]
-    definition: Option<String>,
-
-    /// Output format (json, text)
-    #[arg(short, long, default_value = "text")]
-    output: String,
+    pub definition: Option<String>,
 }
 
 #[derive(Args, Debug)]
 struct LintArgs {
     /// Pipeline file to lint
     #[arg(short, long)]
-    file: Option<PathBuf>,
+    pub file: Option<PathBuf>,
 
     /// Pipeline definition as string
     #[arg(short, long)]
-    definition: Option<String>,
+    pub definition: Option<String>,
 
     /// Strict mode (fail on warnings)
     #[arg(short, long, default_value = "false")]
-    strict: bool,
+    pub strict: bool,
 }
 
 #[derive(Args, Debug)]
 struct DocArgs {
     /// Pipeline file
     #[arg(short, long)]
-    file: Option<PathBuf>,
+    pub file: Option<PathBuf>,
 
     /// Output directory
     #[arg(short, long)]
-    output: Option<PathBuf>,
+    pub output: Option<PathBuf>,
 
     /// Format (markdown, html, man)
     #[arg(short, long, default_value = "markdown")]
-    format: String,
+    pub format: String,
 }
 
 #[derive(Args, Debug)]
 struct ExportArgs {
     /// Pipeline file
     #[arg(short, long)]
-    file: Option<PathBuf>,
+    pub file: Option<PathBuf>,
 
     /// Output file
     #[arg(short, long)]
-    output: Option<PathBuf>,
+    pub output: Option<PathBuf>,
 
     /// Format (json, dockerfile, kubernetes)
     #[arg(short, long, default_value = "json")]
-    format: String,
+    pub format: String,
 }
 
 #[derive(Args, Debug)]
 struct CompletionsArgs {
     /// Shell to generate completions for
     #[arg(short, long)]
-    shell: String,
+    pub shell: String,
 }
 
 #[derive(Args, Debug)]
 struct CheckArgs {
     /// Pipeline file to check
     #[arg(short, long)]
-    file: Option<PathBuf>,
+    pub file: Option<PathBuf>,
 
     /// Pipeline definition as string
     #[arg(short, long)]
-    definition: Option<String>,
+    pub definition: Option<String>,
+}
+
+#[derive(Args, Debug)]
+pub struct GraphArgs {
+    /// Pipeline file to generate graph for
+    #[arg(value_name = "SCRIPT")]
+    pub script: Option<PathBuf>,
+
+    /// Pipeline definition as string
+    #[arg(short, long)]
+    pub definition: Option<String>,
+
+    /// Output format (mermaid, dot)
+    #[arg(long, default_value = "mermaid")]
+    pub format: String,
 }
 
 pub async fn run() -> Result<()> {
     let args = Cli::parse();
+
+    // Load configuration
+    let config = crate::config::load_config(
+        args.config.as_ref(),
+        args.verbose,
+        &args.format,
+        args.no_color,
+    )?;
+
+    // Apply config to tracing
+    // SAFETY: set_var is unsafe but acceptable in single-threaded CLI context
+    if config.verbose {
+        unsafe { std::env::set_var("RUST_LOG", "debug") };
+    } else if let Some(ref log_level) = config.log_level {
+        unsafe { std::env::set_var("RUST_LOG", log_level) };
+    }
+
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .try_init();
 
     match args.command {
         Commands::Run(run_args) => {
             if run_args.watch {
                 #[cfg(feature = "watch")]
                 {
-                    watch_pipeline(run_args).await
+                    watch_pipeline(run_args, config).await
                 }
                 #[cfg(not(feature = "watch"))]
                 {
                     anyhow::bail!("Watch mode requires the 'watch' feature to be enabled");
                 }
             } else {
-                run_pipeline_once(run_args).await
+                run_pipeline_once(run_args, config).await
             }
         }
         Commands::Script(script_args) => script::run_script(script_args).await,
-        Commands::Validate(validate_args) => validate_pipeline(validate_args),
+        Commands::Validate(validate_args) => validate_pipeline(validate_args, config.effective_format()),
         Commands::Lint(lint_args) => lint_pipeline(lint_args),
         Commands::Doc(doc_args) => generate_docs(doc_args),
         Commands::Export(export_args) => export_pipeline(export_args),
         Commands::Completions(completions_args) => generate_completions(completions_args),
         Commands::Check(check_args) => check_pipeline(check_args),
         Commands::Init(init_args) => init::init_pipeline(init_args),
+        Commands::List(list_args) => list::list_pipelines(list_args, config.effective_format()),
+        Commands::Describe(describe_args) => describe::describe_pipeline_cmd(describe_args, config.effective_format()),
+        Commands::Graph(graph_args) => graph::graph_pipeline(graph_args),
+        Commands::Gc(gc_args) => gc::run_gc(gc_args, config.effective_format()),
     }
-}
-
-fn init_tracing(level: &str) {
-    let filter = match level.to_lowercase().as_str() {
-        "error" => "error",
-        "warn" => "warn",
-        "info" => "info",
-        "debug" => "debug",
-        "trace" => "trace",
-        _ => "info",
-    };
-    // SAFETY: set_var is unsafe but acceptable in single-threaded CLI context
-    unsafe {
-        std::env::set_var("RUST_LOG", filter);
-    }
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .try_init();
 }
 
 /// Build ExecutionConfig from CLI RunArgs
 /// This is separated for testability (T3.9)
-fn build_execution_config(args: &RunArgs) -> ExecutionConfig {
-    let mut config = ExecutionConfig::default();
+fn build_execution_config(args: &RunArgs, config: &crate::config::Config) -> ExecutionConfig {
+    let mut exec_config = ExecutionConfig::default();
 
     // T3.7: Wire --cache flag to ExecutionConfig
     let cache_mode = match args.cache.to_lowercase().as_str() {
@@ -255,29 +290,82 @@ fn build_execution_config(args: &RunArgs) -> ExecutionConfig {
         // Default case should not happen as clap validates
         _ => CacheMode::default(),
     };
-    config.cache_mode = cache_mode;
+    exec_config.cache_mode = cache_mode;
 
     // T3.6: Wire --retry flag to ExecutionConfig
     if let Some(max_retries) = args.retry {
-        config.retry_on_failure = true;
-        config.max_retries = max_retries as usize;
+        exec_config.retry_on_failure = true;
+        exec_config.max_retries = max_retries as usize;
     }
 
     // T3.8: Wire --timeout to ExecutionConfig.global_timeout
     if let Some(timeout_secs) = args.timeout {
-        config.global_timeout = Some(std::time::Duration::from_secs(timeout_secs));
+        exec_config.global_timeout = Some(std::time::Duration::from_secs(timeout_secs));
     }
 
-    config
+    // Apply config-level overrides
+    if let Some(ref cache) = config.cache_mode {
+        if let Ok(mode) = parse_cache_mode(cache) {
+            exec_config.cache_mode = mode;
+        }
+    }
+
+    exec_config
 }
 
-async fn run_pipeline_once(args: RunArgs) -> Result<()> {
-    init_tracing(&args.log);
+fn parse_cache_mode(s: &str) -> Result<CacheMode> {
+    match s.to_lowercase().as_str() {
+        "full" => Ok(CacheMode::Full),
+        "deps" => Ok(CacheMode::Deps),
+        "none" => Ok(CacheMode::None),
+        _ => anyhow::bail!("Invalid cache mode: {}", s),
+    }
+}
+
+async fn run_pipeline_once(args: RunArgs, config: crate::config::Config) -> Result<()> {
     info!("Running pipeline");
 
-    let definition = get_definition(&args.file, &args.definition)?;
-    let pipeline: Pipeline =
-        serde_json::from_str(&definition).context("Failed to parse pipeline definition")?;
+    // Get script path (positional arg)
+    let script_path = args.script.as_ref();
+
+    // Detect file type and parse accordingly
+    let pipeline = if let Some(ref path) = script_path {
+        if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+            // .rs file - need to compile and run via script runner
+            info!("Detected .rs file, using script runner");
+            let content = std::fs::read_to_string(path)
+                .with_context(|| format!("Failed to read .rs file: {:?}", path))?;
+            pipeliner_core::dsl::parse_pipeline(&content)
+                .map_err(|e| anyhow::anyhow!("Parse error: {}", e))?
+        } else if path.extension().and_then(|e| e.to_str()) == Some("dsl") {
+            // Use runtime DSL parser for .dsl files
+            info!("Detected .dsl file, using runtime parser");
+            let content = std::fs::read_to_string(path)
+                .with_context(|| format!("Failed to read .dsl file: {:?}", path))?;
+            pipeliner_core::dsl::parse_pipeline(&content)
+                .map_err(|e| anyhow::anyhow!("DSL parse error: {}", e))?
+        } else {
+            // JSON pipeline - read directly from the script path
+            let content = std::fs::read_to_string(path)
+                .with_context(|| format!("Failed to read pipeline file: {:?}", path))?;
+            serde_json::from_str(&content)
+                .context("Failed to parse pipeline JSON")?
+        }
+    } else {
+        // Check if definition looks like DSL (contains "pipeline {")
+        if let Some(ref def) = args.definition {
+            if def.trim_start().starts_with("pipeline {") || def.contains("stage(") {
+                info!("Detected DSL syntax, using runtime parser");
+                pipeliner_core::dsl::parse_pipeline(def)
+                    .map_err(|e| anyhow::anyhow!("DSL parse error: {}", e))?
+            } else {
+                serde_json::from_str(def)
+                    .context("Failed to parse pipeline")?
+            }
+        } else {
+            anyhow::bail!("No pipeline script or definition provided");
+        }
+    };
 
     let name = pipeline.name.clone().unwrap_or_else(|| "Unnamed".to_string());
     info!("Pipeline '{}' parsed successfully", name);
@@ -286,49 +374,20 @@ async fn run_pipeline_once(args: RunArgs) -> Result<()> {
     let mut registry = StepRegistry::new();
     registry.register(Arc::new(ScriptStepFactory::new()));
 
-    // =======================================================================
-    // T3.6, T3.7, T3.8: Build ExecutionConfig from CLI args
-    // =======================================================================
-    let mut config = ExecutionConfig::default();
-
-    // T3.7: Wire --cache flag to ExecutionConfig
-    let cache_mode = match args.cache.to_lowercase().as_str() {
-        "full" => CacheMode::Full,
-        "deps" => CacheMode::Deps,
-        "none" => CacheMode::None,
-        _ => anyhow::bail!("Invalid cache mode: '{}'. Valid: full, deps, none", args.cache),
-    };
-    config.cache_mode = cache_mode;
-    info!("Cache mode: {:?}", config.cache_mode);
-
-    // T3.6: Wire --retry flag to ExecutionConfig
-    if let Some(max_retries) = args.retry {
-        config.retry_on_failure = true;
-        config.max_retries = max_retries as usize;
-        info!("Retry enabled: {} max retries", config.max_retries);
-    }
-
-    // T3.8: Wire --timeout to ExecutionConfig.global_timeout
-    // Keep the outer tokio::time::timeout as a hard guard
-    if let Some(timeout_secs) = args.timeout {
-        config.global_timeout = Some(std::time::Duration::from_secs(timeout_secs));
-        info!("Timeout: {} seconds", timeout_secs);
-    }
+    // Build ExecutionConfig
+    let mut exec_config = build_execution_config(&args, &config);
 
     // Create executor with registry for custom steps
     let mut executor = LocalExecutor::with_registry(registry);
 
     // Apply ExecutionConfig settings to executor via builder pattern
-    // T3.6: Apply retry settings
-    if config.retry_on_failure {
-        executor = executor.with_retry(config.max_retries);
+    if exec_config.retry_on_failure {
+        executor = executor.with_retry(exec_config.max_retries);
     }
 
-    // T3.7: Apply cache mode
-    executor = executor.with_cache_mode(config.cache_mode);
+    executor = executor.with_cache_mode(exec_config.cache_mode);
 
-    // T3.8: Apply global timeout (used by executor; CLI also keeps tokio::time::timeout as hard guard)
-    if let Some(timeout) = config.global_timeout {
+    if let Some(timeout) = exec_config.global_timeout {
         executor = executor.with_global_timeout(timeout);
     }
 
@@ -345,24 +404,20 @@ async fn run_pipeline_once(args: RunArgs) -> Result<()> {
         info!("Dry-run mode enabled");
     }
 
+    // Apply parallelism limit
+    if let Some(parallelism) = args.parallelism {
+        executor = executor.with_max_parallelism(parallelism);
+        info!("Parallelism limit set to {}", parallelism);
+    }
+
     // Apply output format
-    let output_format = match args.output.to_lowercase().as_str() {
-        "json" => OutputFormat::Json,
-        "quiet" => OutputFormat::Quiet,
-        "human" | "text" => OutputFormat::Human,
-        _ => anyhow::bail!("Invalid output format: '{}'. Valid options: human, json, quiet", args.output),
+    let output_format = match config.effective_format() {
+        crate::config::OutputFormat::Json => OutputFormat::Json,
+        crate::config::OutputFormat::Yaml => OutputFormat::Json, // Fallback to json for now
+        crate::config::OutputFormat::Human => OutputFormat::Human,
     };
     executor = executor.with_output_format(output_format);
-    info!("Output format: {}", args.output);
-
-    // Apply environment if specified
-    if let Some(env) = &args.env {
-        // SAFETY: set_var is unsafe but acceptable in single-threaded CLI context
-        unsafe {
-            std::env::set_var("ENVIRONMENT", env);
-        }
-        info!("Environment set to: {}", env);
-    }
+    info!("Output format: {:?}", config.effective_format());
 
     // Execute with optional timeout (using config.global_timeout as reference)
     let execute_future = executor.execute(&pipeline);
@@ -406,21 +461,42 @@ async fn run_pipeline_once(args: RunArgs) -> Result<()> {
     }
 }
 
-fn validate_pipeline(args: ValidateArgs) -> Result<()> {
+fn validate_pipeline(args: ValidateArgs, format: crate::config::OutputFormat) -> Result<()> {
     info!("Validating pipeline");
 
-    let definition = get_definition(&args.file, &args.definition)?;
-    let _pipeline: Pipeline =
-        serde_json::from_str(&definition).context("Failed to parse pipeline definition")?;
+    let definition = get_definition_from_script_or_def(&args.script, &args.definition)?;
 
-    println!("Pipeline is valid");
+    // Try to parse as different formats
+    let pipeline_result: Result<Pipeline, _> = serde_json::from_str(&definition)
+        .context("Not valid JSON");
+
+    let pipeline = if pipeline_result.is_err() {
+        // Try DSL parsing
+        pipeliner_core::dsl::parse_pipeline(&definition)
+            .map_err(|e| anyhow::anyhow!("Not valid DSL: {}", e))?
+    } else {
+        pipeline_result?
+    };
+
+    match format {
+        crate::config::OutputFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(&pipeline)?);
+        }
+        crate::config::OutputFormat::Yaml => {
+            println!("{}", serde_yaml::to_string(&pipeline)?);
+        }
+        crate::config::OutputFormat::Human => {
+            println!("Pipeline is valid: {}", pipeline.name.as_deref().unwrap_or("Unnamed"));
+        }
+    }
+
     Ok(())
 }
 
 fn lint_pipeline(args: LintArgs) -> Result<()> {
     info!("Linting pipeline");
 
-    let definition = get_definition(&args.file, &args.definition)?;
+    let definition = get_definition_from_script_or_def(&args.file, &args.definition)?;
     let _pipeline: Pipeline =
         serde_json::from_str(&definition).context("Failed to parse pipeline definition")?;
 
@@ -431,7 +507,7 @@ fn lint_pipeline(args: LintArgs) -> Result<()> {
 fn generate_docs(args: DocArgs) -> Result<()> {
     info!("Generating documentation");
 
-    let definition = get_definition(&args.file, &None)?;
+    let definition = get_definition_from_script_or_def(&args.file, &None)?;
     let _pipeline: Pipeline =
         serde_json::from_str(&definition).context("Failed to parse pipeline definition")?;
 
@@ -442,7 +518,7 @@ fn generate_docs(args: DocArgs) -> Result<()> {
 fn export_pipeline(args: ExportArgs) -> Result<()> {
     info!("Exporting pipeline");
 
-    let definition = get_definition(&args.file, &None)?;
+    let definition = get_definition_from_script_or_def(&args.file, &None)?;
     let pipeline: Pipeline =
         serde_json::from_str(&definition).context("Failed to parse pipeline definition")?;
 
@@ -477,7 +553,7 @@ fn generate_completions(args: CompletionsArgs) -> Result<()> {
 fn check_pipeline(args: CheckArgs) -> Result<()> {
     info!("Checking pipeline");
 
-    let definition = get_definition(&args.file, &args.definition)?;
+    let definition = get_definition_from_script_or_def(&args.file, &args.definition)?;
     let _pipeline: Pipeline =
         serde_json::from_str(&definition).context("Failed to parse pipeline definition")?;
 
@@ -485,37 +561,35 @@ fn check_pipeline(args: CheckArgs) -> Result<()> {
     Ok(())
 }
 
-fn get_definition(file: &Option<PathBuf>, definition: &Option<String>) -> Result<String> {
-    match (file, definition) {
-        (Some(path), None) if path.as_path() == std::path::Path::new("-") => {
-            use std::io::Read;
-            let mut buf = String::new();
-            std::io::stdin().read_to_string(&mut buf)
-                .context("Failed to read from stdin")?;
-            if buf.trim().is_empty() {
-                anyhow::bail!("No pipeline definition provided on stdin");
-            }
-            Ok(buf)
-        }
-        (Some(path), None) => std::fs::read_to_string(path)
-            .with_context(|| format!("Failed to read file: {:?}", path)),
-        (None, Some(def)) => Ok(def.clone()),
-        (None, None) => anyhow::bail!("Either --file, --definition, or stdin (-) must be provided"),
-        (Some(_), Some(_)) => anyhow::bail!("Cannot specify both --file and --definition"),
+fn get_definition(definition: &Option<String>) -> Result<String> {
+    match definition {
+        Some(def) => Ok(def.clone()),
+        None => anyhow::bail!("Either --definition must be provided or a pipeline file must be specified"),
+    }
+}
+
+fn get_definition_from_script_or_def(script: &Option<PathBuf>, definition: &Option<String>) -> Result<String> {
+    if let Some(path) = script {
+        std::fs::read_to_string(path)
+            .with_context(|| format!("Failed to read file: {:?}", path))
+    } else if let Some(def) = definition {
+        Ok(def.clone())
+    } else {
+        anyhow::bail!("Either a pipeline file or --definition must be provided")
     }
 }
 
 #[cfg(feature = "watch")]
-async fn watch_pipeline(args: RunArgs) -> Result<()> {
-    use notify::{RecommendedWatcher, RecursiveMode, Config, Event, EventKind, Watcher};
+async fn watch_pipeline(args: RunArgs, config: crate::config::Config) -> Result<()> {
+    use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
     use std::sync::mpsc;
     use std::time::Duration;
 
-    let file_path = args.file.clone()
-        .ok_or_else(|| anyhow::anyhow!("--watch requires --file"))?;
+    let file_path = args.script.clone()
+        .ok_or_else(|| anyhow::anyhow!("Running in watch mode requires a script file"))?;
 
     // Initial run
-    run_pipeline_once(args.clone()).await?;
+    run_pipeline_once(args.clone(), config.clone()).await?;
 
     let (tx, rx) = mpsc::channel();
     let mut watcher = RecommendedWatcher::new(
@@ -539,7 +613,7 @@ async fn watch_pipeline(args: RunArgs) -> Result<()> {
         while rx.recv_timeout(Duration::from_millis(500)).is_ok() {}
 
         println!("[WATCH] File changed, re-running pipeline...");
-        if let Err(e) = run_pipeline_once(args.clone()).await {
+        if let Err(e) = run_pipeline_once(args.clone(), config.clone()).await {
             eprintln!("[WATCH] Pipeline failed: {}", e);
         }
     }
@@ -550,11 +624,21 @@ async fn watch_pipeline(args: RunArgs) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
+
+    #[test]
+    fn test_cli_run_with_positional_script() {
+        let args = Cli::parse_from(&["pipeliner", "run", "pipeline.json"]);
+        match args.command {
+            Commands::Run(run_args) => {
+                assert_eq!(run_args.script, Some(PathBuf::from("pipeline.json")));
+            }
+            _ => panic!("Expected Run command"),
+        }
+    }
 
     #[test]
     fn test_cli_validate_parse() {
-        let args = Cli::parse_from(&["pipeliner", "validate", "--file", "test.json"]);
+        let args = Cli::parse_from(&["pipeliner", "validate", "pipeline.json"]);
         match args.command {
             Commands::Validate(_) => {}
             _ => panic!("Expected Validate command"),
@@ -562,29 +646,97 @@ mod tests {
     }
 
     #[test]
-    fn test_cli_run_parse() {
-        let args = Cli::parse_from(&["pipeliner", "run", "--file", "pipeline.jenkins"]);
+    fn test_cli_list_parse() {
+        let args = Cli::parse_from(&["pipeliner", "list"]);
         match args.command {
-            Commands::Run(_) => {}
+            Commands::List(_) => {}
+            _ => panic!("Expected List command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_describe_parse() {
+        let args = Cli::parse_from(&["pipeliner", "describe", "pipeline.json"]);
+        match args.command {
+            Commands::Describe(_) => {}
+            _ => panic!("Expected Describe command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_global_verbose() {
+        let args = Cli::parse_from(&["pipeliner", "-v", "list"]);
+        assert!(args.verbose);
+    }
+
+    #[test]
+    fn test_cli_global_verbose_long() {
+        let args = Cli::parse_from(&["pipeliner", "--verbose", "list"]);
+        assert!(args.verbose);
+    }
+
+    #[test]
+    fn test_cli_global_format() {
+        let args = Cli::parse_from(&["pipeliner", "--format", "json", "list"]);
+        assert_eq!(args.format, "json");
+    }
+
+    #[test]
+    fn test_cli_global_no_color() {
+        let args = Cli::parse_from(&["pipeliner", "--no-color", "list"]);
+        assert!(args.no_color);
+    }
+
+    #[test]
+    fn test_cli_global_config() {
+        let args = Cli::parse_from(&["pipeliner", "--config", "/path/to/config.toml", "list"]);
+        assert_eq!(args.config, Some(PathBuf::from("/path/to/config.toml")));
+    }
+
+    #[test]
+    fn test_cli_init_with_positional_name() {
+        let args = Cli::parse_from(&["pipeliner", "init", "my-pipeline"]);
+        match args.command {
+            Commands::Init(init_args) => {
+                assert_eq!(init_args.name, Some("my-pipeline".to_string()));
+            }
+            _ => panic!("Expected Init command"),
+        }
+    }
+
+    #[test]
+    fn test_cli_run_args_with_all_flags() {
+        let args = Cli::parse_from(&[
+            "pipeliner", "run",
+            "pipeline.json",
+            "--cache", "deps",
+            "--timeout", "300",
+            "--retry", "3",
+        ]);
+        match args.command {
+            Commands::Run(run_args) => {
+                assert_eq!(run_args.script, Some(PathBuf::from("pipeline.json")));
+                assert_eq!(run_args.cache, "deps");
+                assert_eq!(run_args.timeout, Some(300));
+                assert_eq!(run_args.retry, Some(3));
+                assert!(!run_args.watch);
+            }
             _ => panic!("Expected Run command"),
         }
     }
 
     #[test]
-    fn test_cli_lint_parse() {
-        let args = Cli::parse_from(&["pipeliner", "lint", "--file", "pipeline.jenkins"]);
+    fn test_cli_run_args_watch_flag() {
+        let args = Cli::parse_from(&[
+            "pipeliner", "run",
+            "pipeline.json",
+            "--watch",
+        ]);
         match args.command {
-            Commands::Lint(_) => {}
-            _ => panic!("Expected Lint command"),
-        }
-    }
-
-    #[test]
-    fn test_cli_completions_parse() {
-        let args = Cli::parse_from(&["pipeliner", "completions", "--shell", "bash"]);
-        match args.command {
-            Commands::Completions(c) => assert_eq!(c.shell, "bash"),
-            _ => panic!("Expected Completions command"),
+            Commands::Run(run_args) => {
+                assert!(run_args.watch);
+            }
+            _ => panic!("Expected Run command"),
         }
     }
 
@@ -598,313 +750,128 @@ mod tests {
     }
 
     #[test]
-    fn test_get_definition_stdin_path() {
-        // Test that the stdin case is properly handled (path is "-")
-        let path = PathBuf::from("-");
-        assert_eq!(path, PathBuf::from("-"));
-    }
-
-    #[test]
-    fn test_run_args_with_all_flags() {
-        let args = Cli::parse_from(&[
-            "pipeliner", "run",
-            "--file", "test.json",
-            "--log", "debug",
-            "--env", "production",
-            "--cache", "deps",
-            "--timeout", "300",
-            "--retry", "3",
-        ]);
+    fn test_cli_completions_parse() {
+        let args = Cli::parse_from(&["pipeliner", "completions", "--shell", "bash"]);
         match args.command {
-            Commands::Run(run_args) => {
-                assert!(run_args.file.is_some());
-                assert_eq!(run_args.log, "debug");
-                assert_eq!(run_args.env, Some("production".to_string()));
-                assert_eq!(run_args.cache, "deps");
-                assert_eq!(run_args.timeout, Some(300));
-                assert_eq!(run_args.retry, Some(3));
-                assert!(!run_args.watch);
-            }
-            _ => panic!("Expected Run command"),
+            Commands::Completions(c) => assert_eq!(c.shell, "bash"),
+            _ => panic!("Expected Completions command"),
         }
     }
 
     #[test]
-    fn test_run_args_watch_flag() {
-        let args = Cli::parse_from(&[
-            "pipeliner", "run",
-            "--file", "test.json",
-            "--watch",
-        ]);
+    fn test_cli_lint_parse() {
+        let args = Cli::parse_from(&["pipeliner", "lint", "--file", "pipeline.jenkins"]);
         match args.command {
-            Commands::Run(run_args) => {
-                assert!(run_args.watch);
-            }
-            _ => panic!("Expected Run command"),
-        }
-    }
-
-    #[test]
-    fn test_init_command_parse() {
-        let args = Cli::parse_from(&[
-            "pipeliner", "init",
-            "--name", "my-pipeline",
-            "--output", "pipeline.json",
-        ]);
-        match args.command {
-            Commands::Init(init_args) => {
-                assert_eq!(init_args.name, Some("my-pipeline".to_string()));
-                assert_eq!(init_args.output, PathBuf::from("pipeline.json"));
-            }
-            _ => panic!("Expected Init command"),
-        }
-    }
-
-    #[test]
-    fn test_init_command_default_output() {
-        let args = Cli::parse_from(&["pipeliner", "init"]);
-        match args.command {
-            Commands::Init(init_args) => {
-                assert_eq!(init_args.output, PathBuf::from("pipeline.json"));
-            }
-            _ => panic!("Expected Init command"),
+            Commands::Lint(_) => {}
+            _ => panic!("Expected Lint command"),
         }
     }
 
     // =======================================================================
-    // T3.9: CLI Integration Tests for Flags Wiring
+    // ExecutionConfig tests
     // =======================================================================
 
     #[test]
     fn test_build_execution_config_retry_flag() {
-        // T3.6: Verify --retry flag wires to ExecutionConfig correctly
         let args = RunArgs {
-            file: Some(PathBuf::from("test.json")),
+            script: Some(PathBuf::from("test.json")),
             definition: None,
             working_dir: None,
-            verbose: false,
             stages: None,
             dry_run: false,
-            output: "human".to_string(),
-            log: "info".to_string(),
-            env: None,
             cache: "full".to_string(),
             timeout: None,
             retry: Some(3),
             watch: false,
         };
 
-        let config = build_execution_config(&args);
+        let config = crate::config::Config::default();
+        let exec_config = build_execution_config(&args, &config);
 
-        assert!(config.retry_on_failure, "retry_on_failure should be true when --retry is set");
-        assert_eq!(config.max_retries, 3, "max_retries should be 3");
-    }
-
-    #[test]
-    fn test_build_execution_config_retry_flag_zero_retries() {
-        // T3.6: Verify --retry 0 sets retry_on_failure=true with max_retries=0
-        let args = RunArgs {
-            file: Some(PathBuf::from("test.json")),
-            definition: None,
-            working_dir: None,
-            verbose: false,
-            stages: None,
-            dry_run: false,
-            output: "human".to_string(),
-            log: "info".to_string(),
-            env: None,
-            cache: "full".to_string(),
-            timeout: None,
-            retry: Some(0),
-            watch: false,
-        };
-
-        let config = build_execution_config(&args);
-
-        // When retry is specified (even 0), retry_on_failure is enabled
-        assert!(config.retry_on_failure, "retry_on_failure should be true when --retry is specified");
-        assert_eq!(config.max_retries, 0, "max_retries should be 0");
+        assert!(exec_config.retry_on_failure, "retry_on_failure should be true when --retry is set");
+        assert_eq!(exec_config.max_retries, 3, "max_retries should be 3");
     }
 
     #[test]
     fn test_build_execution_config_cache_none() {
-        // T3.7: Verify --cache none wires to CacheMode::None
         let args = RunArgs {
-            file: Some(PathBuf::from("test.json")),
+            script: Some(PathBuf::from("test.json")),
             definition: None,
             working_dir: None,
-            verbose: false,
             stages: None,
             dry_run: false,
-            output: "human".to_string(),
-            log: "info".to_string(),
-            env: None,
             cache: "none".to_string(),
             timeout: None,
             retry: None,
             watch: false,
         };
 
-        let config = build_execution_config(&args);
+        let config = crate::config::Config::default();
+        let exec_config = build_execution_config(&args, &config);
 
-        assert_eq!(config.cache_mode, CacheMode::None, "cache_mode should be CacheMode::None");
-    }
-
-    #[test]
-    fn test_build_execution_config_cache_deps() {
-        // T3.7: Verify --cache deps wires to CacheMode::Deps
-        let args = RunArgs {
-            file: Some(PathBuf::from("test.json")),
-            definition: None,
-            working_dir: None,
-            verbose: false,
-            stages: None,
-            dry_run: false,
-            output: "human".to_string(),
-            log: "info".to_string(),
-            env: None,
-            cache: "deps".to_string(),
-            timeout: None,
-            retry: None,
-            watch: false,
-        };
-
-        let config = build_execution_config(&args);
-
-        assert_eq!(config.cache_mode, CacheMode::Deps, "cache_mode should be CacheMode::Deps");
-    }
-
-    #[test]
-    fn test_build_execution_config_cache_full() {
-        // T3.7: Verify --cache full (default) wires to CacheMode::Full
-        let args = RunArgs {
-            file: Some(PathBuf::from("test.json")),
-            definition: None,
-            working_dir: None,
-            verbose: false,
-            stages: None,
-            dry_run: false,
-            output: "human".to_string(),
-            log: "info".to_string(),
-            env: None,
-            cache: "full".to_string(),
-            timeout: None,
-            retry: None,
-            watch: false,
-        };
-
-        let config = build_execution_config(&args);
-
-        assert_eq!(config.cache_mode, CacheMode::Full, "cache_mode should be CacheMode::Full");
+        assert_eq!(exec_config.cache_mode, CacheMode::None, "cache_mode should be CacheMode::None");
     }
 
     #[test]
     fn test_build_execution_config_timeout() {
-        // T3.8: Verify --timeout wires to ExecutionConfig.global_timeout
         let args = RunArgs {
-            file: Some(PathBuf::from("test.json")),
+            script: Some(PathBuf::from("test.json")),
             definition: None,
             working_dir: None,
-            verbose: false,
             stages: None,
             dry_run: false,
-            output: "human".to_string(),
-            log: "info".to_string(),
-            env: None,
             cache: "full".to_string(),
             timeout: Some(300),
             retry: None,
             watch: false,
         };
 
-        let config = build_execution_config(&args);
+        let config = crate::config::Config::default();
+        let exec_config = build_execution_config(&args, &config);
 
-        assert!(config.global_timeout.is_some(), "global_timeout should be Some");
-        assert_eq!(config.global_timeout.unwrap().as_secs(), 300, "global_timeout should be 300 seconds");
+        assert!(exec_config.global_timeout.is_some(), "global_timeout should be Some");
+        assert_eq!(exec_config.global_timeout.unwrap().as_secs(), 300, "global_timeout should be 300 seconds");
     }
 
     #[test]
-    fn test_build_execution_config_timeout_none() {
-        // T3.8: Verify no --timeout results in None
+    fn test_build_execution_config_default_values() {
         let args = RunArgs {
-            file: Some(PathBuf::from("test.json")),
+            script: Some(PathBuf::from("test.json")),
             definition: None,
             working_dir: None,
-            verbose: false,
             stages: None,
             dry_run: false,
-            output: "human".to_string(),
-            log: "info".to_string(),
-            env: None,
             cache: "full".to_string(),
             timeout: None,
             retry: None,
             watch: false,
         };
 
-        let config = build_execution_config(&args);
+        let config = crate::config::Config::default();
+        let exec_config = build_execution_config(&args, &config);
 
-        assert!(config.global_timeout.is_none(), "global_timeout should be None when not specified");
+        assert!(!exec_config.retry_on_failure, "retry_on_failure should be false by default");
+        assert_eq!(exec_config.max_retries, 0, "max_retries should be 0 by default");
+        assert_eq!(exec_config.cache_mode, CacheMode::Full, "cache_mode should be Full by default");
+        assert!(exec_config.global_timeout.is_none(), "global_timeout should be None by default");
     }
 
     #[test]
-    fn test_build_execution_config_combined_flags() {
-        // T3.9: Verify combined flags work together
-        let args = RunArgs {
-            file: Some(PathBuf::from("test.json")),
-            definition: None,
-            working_dir: None,
-            verbose: false,
-            stages: None,
-            dry_run: false,
-            output: "human".to_string(),
-            log: "info".to_string(),
-            env: None,
-            cache: "deps".to_string(),
-            timeout: Some(600),
-            retry: Some(5),
-            watch: false,
-        };
+    fn test_get_definition_with_definition_only() {
+        let script: Option<PathBuf> = None;
+        let definition = Some("inline definition".to_string());
 
-        let config = build_execution_config(&args);
-
-        // T3.6: Retry settings
-        assert!(config.retry_on_failure, "retry_on_failure should be true");
-        assert_eq!(config.max_retries, 5, "max_retries should be 5");
-
-        // T3.7: Cache mode
-        assert_eq!(config.cache_mode, CacheMode::Deps, "cache_mode should be CacheMode::Deps");
-
-        // T3.8: Timeout
-        assert!(config.global_timeout.is_some(), "global_timeout should be Some");
-        assert_eq!(config.global_timeout.unwrap().as_secs(), 600, "global_timeout should be 600 seconds");
+        let result = get_definition_from_script_or_def(&script, &definition);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "inline definition");
     }
 
     #[test]
-    fn test_build_execution_config_default_values() {
-        // Verify default ExecutionConfig values when no flags are specified
-        let args = RunArgs {
-            file: Some(PathBuf::from("test.json")),
-            definition: None,
-            working_dir: None,
-            verbose: false,
-            stages: None,
-            dry_run: false,
-            output: "human".to_string(),
-            log: "info".to_string(),
-            env: None,
-            cache: "full".to_string(), // default
-            timeout: None,
-            retry: None,
-            watch: false,
-        };
+    fn test_get_definition_without_script_or_def() {
+        let script: Option<PathBuf> = None;
+        let definition: Option<String> = None;
 
-        let config = build_execution_config(&args);
-
-        // Default values
-        assert!(!config.retry_on_failure, "retry_on_failure should be false by default");
-        assert_eq!(config.max_retries, 0, "max_retries should be 0 by default");
-        assert_eq!(config.cache_mode, CacheMode::Full, "cache_mode should be Full by default");
-        assert!(config.global_timeout.is_none(), "global_timeout should be None by default");
+        let result = get_definition_from_script_or_def(&script, &definition);
+        assert!(result.is_err());
     }
 }

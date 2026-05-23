@@ -6,10 +6,16 @@
 //!
 //! ```bash
 //! # Run a pipeline
-//! pipeliner run --file pipeline.jenkins
+//! pipeliner run pipeline.jenkins
 //!
 //! # Validate a pipeline
-//! pipeliner validate --file pipeline.jenkins
+//! pipeliner validate pipeline.jenkins
+//!
+//! # List pipelines
+//! pipeliner list
+//!
+//! # Describe pipeline
+//! pipeliner describe pipeline.jenkins
 //!
 //! # Generate shell completions
 //! pipeliner completions --shell bash
@@ -19,6 +25,7 @@
 #![warn(unused)]
 
 pub mod commands;
+pub mod config;
 
 pub use commands::run;
 

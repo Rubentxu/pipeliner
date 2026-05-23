@@ -46,7 +46,7 @@ pub mod manifest;
 pub mod runner;
 
 pub use cache::ScriptCache;
-pub use compiler::ScriptCompiler;
+pub use compiler::{GeneratedShellScript, ScriptCompiler};
 pub use manifest::{Manifest, ManifestError};
 pub use runner::{ScriptOutput, ScriptResult, ScriptRunner};
 pub use step_factory::ScriptStepFactory;

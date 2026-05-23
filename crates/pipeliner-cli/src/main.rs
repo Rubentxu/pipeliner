@@ -1,5 +1,4 @@
 use anyhow::Result;
-use clap::Parser;
 use pipeliner_cli::commands;
 use tracing_subscriber::EnvFilter;
 

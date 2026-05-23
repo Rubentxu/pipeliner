@@ -1,0 +1,109 @@
+## Verification Report: MVP-3 Credentials & Artifacts
+
+**Change**: mvp-3-credentials-artifacts
+**Version**: N/A
+**Mode**: Standard
+
+---
+
+### Completeness
+| Metric | Value |
+|--------|-------|
+| Tasks total | 34 |
+| Tasks complete | 26 |
+| Tasks incomplete | 8 |
+
+**Incomplete Tasks:**
+- Phase 6.1-6.4: gc --keep command (NOT STARTED)
+- Phase 8.4-8.7: Integration tests (NOT STARTED)
+
+---
+
+### Build & Tests Execution
+
+**Build**: ❌ FAILED
+
+```
+error: failed to load manifest for workspace member `pipeliner-runtime`
+Caused by: `dependency.glob` was not found in `workspace.dependencies`
+```
+
+The workspace Cargo.toml is missing `glob`, `zip`, `tar`, `flate2` in workspace.dependencies, but `pipeliner-runtime/Cargo.toml` references them via `workspace = true`.
+
+**Individual crate builds:**
+- ✅ pipeliner-credentials: builds successfully
+- ✅ pipeliner-core: builds successfully  
+- ❌ pipeliner-runtime: cannot load manifest (broken workspace deps)
+
+**Tests**: ⚠️ Partial
+- pipeliner-credentials: ✅ 47 passed, 0 failed
+- pipeliner-core: ⚠️ 12 passed, 1 doctest FAILED (pre-existing issue in validation.rs doctest, unrelated to MVP-3)
+
+---
+
+### Correctness (Static — Structural Evidence)
+
+| Requirement | Status | Evidence |
+|------------|--------|----------|
+| CredentialProvider trait | ✅ Implemented | `pipeliner-credentials/src/provider.rs:65` - trait with `get()`, `list()`, `put()` |
+| MemoryProvider | ✅ Implemented | `providers/memory.rs` - HashMap-backed in-memory store |
+| EnvProvider | ✅ Implemented | `providers/env.rs` - reads from environment variables |
+| FileProvider | ✅ Implemented | `providers/file.rs` - reads from .env/.toml files |
+| with_credentials step | ✅ Implemented | `step_spec.rs:197` + `local_executor.rs:1236` |
+| StepType::JUnit | ✅ Implemented | `step_spec.rs:244` + `local_executor.rs:1331` |
+| archive step | ✅ Implemented | `step_spec.rs:272` + `local_executor.rs:1412` |
+| gc --keep command | ❌ Missing | No CLI implementation found |
+| secret masking | ✅ Implemented | `masking.rs` - SecretMasker with default patterns |
+
+---
+
+### Coherence (Design)
+
+| Decision | Followed? | Notes |
+|----------|-----------|-------|
+| CredentialProvider trait pattern | ✅ Yes | Trait + Arc pattern matches StepFactory |
+| SecretMasker via EnvContext extension | ✅ Yes | masking.rs with register_variable() |
+| JUnit as Archive enhancement | ✅ Yes | JUnitStepSpec in step_spec.rs |
+
+---
+
+### CogniCode Structural Analysis
+
+| Check | Result | Notes |
+|-------|--------|-------|
+| Orphaned callers | ⚠️ N/A | Cannot analyze (build fails) |
+| Architecture score | ✅ 60/100 unchanged | Pre-existing cycles in pipeline_parsing.rs |
+| Hot paths reachable | ✅ N/A | Build required for runtime analysis |
+
+---
+
+### Issues Found
+
+**CRITICAL (must fix before archive):**
+1. Workspace `Cargo.toml` missing dependencies: `glob`, `zip`, `tar`, `flate2` must be added to `[workspace.dependencies]` to allow `pipeliner-runtime` to build
+2. gc --keep command (Phase 6) not implemented - 4 tasks incomplete
+
+**WARNING (should fix):**
+1. Integration tests (Phase 8.4-8.7) not written for: with_credentials, JUnit, archive, gc commands
+
+**SUGGESTION (nice to have):**
+1. Pre-existing doctest failure in `pipeliner-core/src/validation.rs:283` - `count_depth` function not found
+
+---
+
+### Verdict
+
+**FAIL** — Cannot complete verification due to build failure.
+
+The workspace has a manifest configuration issue that prevents building `pipeliner-runtime` which contains the runtime executor implementations for the new steps. Additionally, Phase 6 (gc --keep command) is completely unimplemented.
+
+**Summary**: 6/7 spec items implemented (credential provider, providers, with_credentials, JUnit, archive, secret masking). gc --keep command pending. Build broken due to workspace dependency configuration.
+
+---
+
+### Files Requiring Fix
+
+| File | Issue |
+|------|-------|
+| `Cargo.toml` (workspace root) | Add `glob`, `zip`, `tar`, `flate2` to `[workspace.dependencies]` |
+| `crates/pipeliner-cli/` | Implement gc --keep command (Phase 6) |

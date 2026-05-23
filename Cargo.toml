@@ -4,6 +4,7 @@ members = [
     "crates/pipeliner-core",
     "crates/pipeliner-macros",
     "crates/pipeliner-executor",
+    "crates/pipeliner-runtime",
 ]
 
 # Example crates (declarative pipelines)
@@ -15,6 +16,10 @@ path = "examples/src/main.rs"
 name = "petclinic"
 path = "examples/petclinic.rs"
 
+[[example]]
+name = "dsl-runner"
+path = "examples/dsl-runner.rs"
+
 [workspace.dependencies]
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -22,11 +27,20 @@ serde_json = "1.0"
 
 # Async runtime
 tokio = { version = "1.35", features = ["full"] }
+tokio-util = { version = "0.7" }
 async-trait = "0.1"
 
 # Error handling
 thiserror = "1.0"
 anyhow = "1.0"
+
+clap = { version = "4.0", features = ["derive", "cargo"] }
+clap_complete = "4.0"
+clap_mangen = "4.0"
+notify = "6"
+prost = "0.12"
+prost-types = "0.12"
+tonic = { version = "0.10", features = ["prost", "tls"] }
 
 # Logging and tracing
 tracing = "0.1"
@@ -37,6 +51,7 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde", "std"] }
 regex = "1.0"
 once_cell = "1.0"
+parking_lot = "0.12"
 proptest = "1.0"
 quote = "1.0"
 syn = { version = "2.0", features = ["full"] }
@@ -77,6 +92,7 @@ tokio = { workspace = true }
 tracing-subscriber = { workspace = true }
 pipeliner-macros = { path = "crates/pipeliner-macros" }
 pipeliner-core = { path = "crates/pipeliner-core" }
+serde_json = { workspace = true }
 
 [profile.release]
 opt-level = 3

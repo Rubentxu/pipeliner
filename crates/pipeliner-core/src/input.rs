@@ -411,6 +411,7 @@ mod tests {
                     "name": "Test Pipeline",
                     "stages": [
                         {
+                            "type": "stage",
                             "name": "Build",
                             "steps": [
                                 {"type": "echo", "message": "Hello"}
@@ -591,6 +592,7 @@ mod tests {
                     "name": "Round Trip Pipeline",
                     "stages": [
                         {
+                            "type": "stage",
                             "name": "Build",
                             "steps": [
                                 {"type": "echo", "message": "Round trip works"}
@@ -612,6 +614,6 @@ mod tests {
         let pipeline = result.unwrap();
         assert_eq!(pipeline.name(), Some("Round Trip Pipeline"));
         assert_eq!(pipeline.stages.len(), 1);
-        assert_eq!(pipeline.stages[0].name, "Build");
+        assert_eq!(pipeline.stages[0].as_stage().map(|s| s.name.as_str()), Some("Build"));
     }
 }

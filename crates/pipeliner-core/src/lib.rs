@@ -77,6 +77,7 @@ pub mod environment;
 pub mod input;
 pub mod logging;
 pub mod matrix;
+pub mod dsl;
 pub mod options;
 pub mod parameters;
 pub mod pipeline;
@@ -84,25 +85,34 @@ pub mod prelude;
 pub mod registry;
 pub mod runner;
 pub mod runtime;
+pub mod spec;
 pub mod structure;
 pub mod validation;
 
 // Re-exports for common use
 pub use agent::{AgentConfig, AgentType, DockerConfig, KubernetesConfig, PodmanConfig};
-pub use config::{ConfigError, CredentialConfig, CredentialType, LibraryConfig, LibraryModule, PipelineConfig, PipelineSpec, RetrieverType, ScmConfig};
+pub use config::{ConfigError, CredentialConfig, CredentialType, LibraryConfig, LibraryModule, PipelineConfig, RetrieverType, ScmConfig};
 pub use environment::{Environment, VariableResolver};
 pub use input::{InputError, PipelineInput};
 pub use logging::LogLevel;
 pub use matrix::{MatrixAxis, MatrixConfig, MatrixExclude};
 pub use options::{PipelineOptions, Retry, Timeout, Trigger};
 pub use parameters::{ParameterType, Parameters};
-pub use pipeline::{Pipeline, Stage, Step, StepType, StepWhenCondition, EnvCheck, LlmAgentConfig};
+pub use pipeline::{Pipeline, Stage, Step, StepType, StepWhenCondition, EnvCheck, LlmAgentConfig, ParallelGroup, StageOrParallel};
 pub use context::PipelineContext;
 pub use registry::{CustomStep, StepError, StepFactory, StepRegistry};
 pub use runtime::{LifecyclePhase, PhaseResult, PipelineRuntime, PipelineRunResult, RuntimeError};
 pub use runner::{PipelineRunner, RunnerConfig};
 pub use structure::{PipelineStructure, StageStructure, StepStructure};
 pub use validation::{Validate, ValidationError, ValidationResult};
+
+// Spec module re-exports for declarative pipeline specifications
+pub use spec::{minutes, seconds, EnvSpec, OptionsSpec, PipelineSpec, PostSpec};
+pub use spec::{StageExecution, StageSpec};
+pub use spec::{
+    DirStepSpec, EchoStepSpec, InterpolationMode, LetOutputStepSpec, ShellKind, ShellStepSpec,
+    StepSpec, WithEnvStepSpec,
+};
 
 // Version
 /// Pipeliner Core version

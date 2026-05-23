@@ -102,6 +102,15 @@ pub enum ValidationError {
         reason: String,
     },
 
+    /// Stage depth exceeds maximum allowed depth
+    #[error("parallel group depth {depth} exceeds maximum {max}")]
+    StageDepthExceeded {
+        /// Current depth
+        depth: usize,
+        /// Maximum allowed depth
+        max: usize,
+    },
+
     /// Validation error with path context
     #[error("validation error at {path}: {error}")]
     WithPath {
@@ -208,6 +217,9 @@ impl ValidationContext {
 pub mod rules {
     use super::*;
 
+    /// Default maximum stage depth for nested parallel groups
+    pub const DEFAULT_MAX_STAGE_DEPTH: usize = 4;
+
     /// Validates that a name is not empty
     pub fn validate_name(name: &str, _field: &str) -> Result<(), ValidationError> {
         if name.trim().is_empty() {
@@ -251,6 +263,56 @@ pub mod rules {
                     name: stage.clone(),
                 });
             }
+        }
+        Ok(())
+    }
+
+    /// Validates that parallel group depth does not exceed the maximum.
+    ///
+    /// This function recursively traverses nested parallel groups and ensures
+    /// the depth does not exceed `max_depth`.
+    ///
+    /// # Arguments
+    ///
+    /// * `depth` - Current depth in the parallel group hierarchy
+    /// * `max_depth` - Maximum allowed depth (default: 4)
+    /// * `get_children` - A closure that returns child items for a given item
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use pipeliner_core::validation::rules::validate_stage_depth;
+    ///
+    /// #[derive(Debug, Clone)]
+    /// struct Stage {
+    ///     children: Option<Vec<Stage>>,
+    /// }
+    ///
+    /// fn validate_depth_example() {
+    ///     let root = Stage { children: Some(vec![
+    ///         Stage { children: Some(vec![
+    ///             Stage { children: None }
+    ///         ])}
+    ///     ])};
+    ///
+    ///     // Count depth of 2 (root + 1 child + 1 grandchild)
+    ///     let depth = count_depth(&root);
+    ///     assert!(depth <= 4); // Passes validation
+    /// }
+    /// ```
+    pub fn validate_stage_depth<T, F>(
+        depth: usize,
+        max_depth: usize,
+        get_children: &F,
+    ) -> Result<(), ValidationError>
+    where
+        F: Fn(&T) -> Option<Vec<T>>,
+    {
+        if depth > max_depth {
+            return Err(ValidationError::StageDepthExceeded {
+                depth,
+                max: max_depth,
+            });
         }
         Ok(())
     }

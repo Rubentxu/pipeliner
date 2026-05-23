@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "pipeliner-core",
+    "pipeliner-protocol",
     "pipeliner-executor",
     "pipeliner-infrastructure",
     "pipeliner-worker",
@@ -24,6 +25,8 @@ members = [
     "pipeliner-steps-notify",
     "pipeliner-agent",
     "pipeliner-mcp",
+    "pipeliner-runtime",
+    "pipeliner-credentials",
 ]
 
 resolver = "1"
@@ -36,6 +39,8 @@ serde_with = "3.0"
 
 # Internal crates
 pipeliner-core = { path = "pipeliner-core" }
+pipeliner-script = { path = "pipeliner-script" }
+pipeliner-runtime = { path = "pipeliner-runtime" }
 
 # Error handling
 thiserror = "1.0"
@@ -43,6 +48,7 @@ anyhow = "1.0"
 
 # Async runtime
 tokio = { version = "1.35", features = ["full", "rt-multi-thread"] }
+tokio-util = "0.7"
 async-trait = "0.1"
 
 # Logging and observability
@@ -68,6 +74,11 @@ glob = "0.3"
 
 # Command execution
 os_pipe = "1"
+
+# Archive
+zip = "2"
+tar = "0.4"
+flate2 = "1"
 
 # Container runtime
 kube = "0.92"

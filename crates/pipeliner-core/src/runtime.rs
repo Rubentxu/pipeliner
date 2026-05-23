@@ -457,6 +457,7 @@ mod tests {
                     "name": "ConfigTest",
                     "stages": [
                         {
+                            "type": "stage",
                             "name": "Build",
                             "steps": [
                                 {"type": "echo", "message": "Hello"}
@@ -508,6 +509,7 @@ mod tests {
                     "name": "LibraryTest",
                     "stages": [
                         {
+                            "type": "stage",
                             "name": "Build",
                             "steps": [
                                 {"type": "echo", "message": "Hello"}
@@ -543,6 +545,7 @@ mod tests {
                     "name": "NoLibrariesTest",
                     "stages": [
                         {
+                            "type": "stage",
                             "name": "Build",
                             "steps": [
                                 {"type": "echo", "message": "Hello"}

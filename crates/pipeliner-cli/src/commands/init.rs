@@ -7,7 +7,7 @@ use std::path::PathBuf;
 #[derive(Args, Debug)]
 pub struct InitArgs {
     /// Pipeline name
-    #[arg(long)]
+    #[arg(value_name = "NAME")]
     pub name: Option<String>,
 
     /// Output file path

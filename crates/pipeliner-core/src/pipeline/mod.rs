@@ -1218,6 +1218,108 @@ impl Step {
         self.timeout = Some(duration);
         self
     }
+
+    /// Creates a timeout wrapper step (Jenkins-style)
+    #[must_use]
+    pub fn timeout(duration: Duration, step: Step) -> Self {
+        Self {
+            step_type: StepType::Timeout {
+                duration,
+                step: Box::new(step),
+            },
+            name: None,
+            timeout: None,
+            retry: None,
+        }
+    }
+
+    /// Creates a retry wrapper step (Jenkins-style)
+    #[must_use]
+    pub fn retry(count: usize, step: Step) -> Self {
+        Self {
+            step_type: StepType::Retry {
+                count,
+                step: Box::new(step),
+            },
+            name: None,
+            timeout: None,
+            retry: None,
+        }
+    }
+
+    /// Creates a dir step
+    #[must_use]
+    pub fn dir(path: PathBuf, steps: Vec<Step>) -> Self {
+        Self {
+            step_type: StepType::Dir { path, steps },
+            name: None,
+            timeout: None,
+            retry: None,
+        }
+    }
+
+    /// Creates a stash step
+    #[must_use]
+    pub fn stash(name: impl Into<String>, includes: Vec<String>) -> Self {
+        Self {
+            step_type: StepType::Stash {
+                name: name.into(),
+                includes,
+                excludes: vec![],
+            },
+            name: None,
+            timeout: None,
+            retry: None,
+        }
+    }
+
+    /// Creates an unstash step
+    #[must_use]
+    pub fn unstash(name: impl Into<String>) -> Self {
+        Self {
+            step_type: StepType::Unstash { name: name.into() },
+            name: None,
+            timeout: None,
+            retry: None,
+        }
+    }
+
+    /// Creates an input step
+    #[must_use]
+    pub fn input(message: impl Into<String>, default: Option<String>) -> Self {
+        Self {
+            step_type: StepType::Input { 
+                message: message.into(), 
+                default, 
+                parameters: vec![],
+            },
+            name: None,
+            timeout: None,
+            retry: None,
+        }
+    }
+
+    /// Creates a log step
+    #[must_use]
+    pub fn log(level: crate::logging::LogLevel, message: impl Into<String>) -> Self {
+        Self {
+            step_type: StepType::Log { level, message: message.into() },
+            name: None,
+            timeout: None,
+            retry: None,
+        }
+    }
+
+    /// Creates a custom step
+    #[must_use]
+    pub fn custom(name: impl Into<String>, config: serde_json::Value) -> Self {
+        Self {
+            step_type: StepType::Custom { name: name.into(), config },
+            name: None,
+            timeout: None,
+            retry: None,
+        }
+    }
 }
 
 #[cfg(test)]

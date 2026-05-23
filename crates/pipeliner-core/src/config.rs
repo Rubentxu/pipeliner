@@ -16,6 +16,7 @@
 //!             "name": "MyPipeline",
 //!             "stages": [
 //!                 {
+//!                     "type": "stage",
 //!                     "name": "Build",
 //!                     "steps": [
 //!                         {"type": "echo", "message": "Hello"}
@@ -297,6 +298,7 @@ mod tests {
                     "name": "FullPipeline",
                     "stages": [
                         {
+                            "type": "stage",
                             "name": "Test",
                             "steps": [
                                 {"type": "echo", "message": "Testing"}
@@ -558,6 +560,7 @@ mod tests {
                 "name": "TestPipeline",
                 "stages": [
                     {
+                        "type": "stage",
                         "name": "Build",
                         "steps": [
                             {"type": "echo", "message": "Hello"}
